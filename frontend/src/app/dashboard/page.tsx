@@ -400,9 +400,9 @@ function DashboardContent() {
 
       {/* ── KPI Cards ───────────────────────────────────────────────── */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
-        <MetricCard label="Latencia API Prom." value={results.api ? `${results.api.avgLatency.toFixed(2)}ms` : "0.00ms"} icon={Server}      color={COLORS.primary} desc="Tiempo de respuesta promedio" />
+        <MetricCard label="Latencia API Prom." value={results.api?.avgLatency != null ? `${results.api.avgLatency.toFixed(2)}ms` : "0.00ms"} icon={Server}      color={COLORS.primary} desc="Tiempo de respuesta promedio" />
         <MetricCard label="Throughput WS"      value={results.websocket ? `${results.websocket.messagesSent + results.websocket.messagesReceived} msg` : "0 msg/s"} icon={Radio} color={COLORS.success} desc="Total mensajes / tasa" />
-        <MetricCard label="Tiempo DB Prom."    value={results.database ? `${results.database.avgDuration}ms` : "0.00ms"} icon={Database}    color={COLORS.warning} desc="Duración promedio consultas" />
+        <MetricCard label="Tiempo DB Prom."    value={results.database?.avgDuration != null ? `${results.database.avgDuration}ms` : "0.00ms"} icon={Database}    color={COLORS.warning} desc="Duración promedio consultas" />
         <MetricCard label="Tasa de Éxito"      value={results.api ? `${results.api.successRate}%` : "0%"}                icon={ShieldCheck} color={COLORS.purple}  desc="Solicitudes exitosas" />
         <MetricCard label="CPU / Memoria"      value={`${metrics.cpuAvg}% / ${metrics.memAvg}%`}                        icon={Activity}    color={COLORS.pink}    desc="Uso real del sistema" />
         <MetricCard label="Módulos Completos"  value={`${completedCount} / ${modules.length}`}                          icon={Zap}         color={COLORS.danger}  desc="Tests ejecutados" />
