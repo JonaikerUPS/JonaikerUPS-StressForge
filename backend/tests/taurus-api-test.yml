@@ -1,0 +1,12 @@
+execution:
+- executor: jmeter
+  concurrency: 10
+  ramp-up: 5s
+  hold-for: 25s
+  scenario: api-test
+
+scenarios:
+  api-test:
+    requests:
+    - url: https://api.dominio.com/v1/resource
+      method: GET

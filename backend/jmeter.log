@@ -1,0 +1,20 @@
+2026-06-24 12:58:53,819 INFO o.a.j.u.JMeterUtils: Setting Locale to en_EN
+2026-06-24 12:58:53,838 INFO o.a.j.JMeter: Loading user properties from: C:\Users\Jonai\AppData\Local\Programs\JMeter\bin\user.properties
+2026-06-24 12:58:53,838 INFO o.a.j.JMeter: Loading system properties from: C:\Users\Jonai\AppData\Local\Programs\JMeter\bin\system.properties
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: Copyright (c) 1998-2024 The Apache Software Foundation
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: Version 5.6.3
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: java.version=21.0.11
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: java.vm.name=OpenJDK 64-Bit Server VM
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: os.name=Windows 10
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: os.arch=amd64
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: os.version=10.0
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: file.encoding=UTF-8
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: java.awt.headless=null
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: Max memory     =1073741824
+2026-06-24 12:58:53,855 INFO o.a.j.JMeter: Available Processors =4
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: Default Locale=English (EN)
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: JMeter  Locale=English (EN)
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: JMeterHome=C:\Users\Jonai\AppData\Local\Programs\JMeter
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: user.dir  =C:\Users\Jonai\Docker\backend
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: PWD       =C:\Users\Jonai\Docker\backend
+2026-06-24 12:58:53,886 INFO o.a.j.JMeter: IP: 172.30.0.1 Name: Lalitude-E6430 FullName: Lalitude-E6430.mshome.net

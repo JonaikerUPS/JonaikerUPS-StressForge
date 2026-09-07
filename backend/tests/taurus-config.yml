@@ -1,0 +1,15 @@
+execution:
+  - executor: locust
+    scenario: simple-load
+    concurrency: 5
+    ramp-up: 10s
+    hold-for: 20s
+
+settings:
+  log-level: warning
+scenarios:
+  simple-load:
+    default-address: ${TARGET_URL}
+    requests:
+      - url: /
+        method: GET

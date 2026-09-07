@@ -1,0 +1,11 @@
+execution:
+  - scenario: nginx-stress
+    concurrency: 1
+    ramp-up: 1s
+    hold-for: 3s
+
+scenarios:
+  nginx-stress:
+    requests:
+      - url: http://nginx.org/
+        method: GET

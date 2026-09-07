@@ -1,0 +1,9 @@
+config:
+  target: "{{ $processEnvironment.TARGET_URL }}"
+  phases:
+    - duration: "{{ $processEnvironment.DURATION }}"
+      arrivalRate: "{{ $processEnvironment.CONCURRENCY }}"
+scenarios:
+  - flow:
+    - get:
+        url: "/"

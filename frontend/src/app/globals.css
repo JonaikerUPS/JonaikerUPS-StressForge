@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-background: #ffffff;
+  --color-foreground: #0f172a;
+  --color-surface: #f8fafc;
+  --color-surface-strong: #ffffff;
+  --color-border: #e2e8f0;
+  
+  --color-background-dark: #0f172a;
+  --color-foreground-dark: #f8fafc;
+  --color-surface-dark: #0f172a;
+  --color-surface-strong-dark: #020617;
+  --color-border-dark: #1e293b;
+}
+
+/* Forzar modo manual: Solo usar la clase .dark */
+:root {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}
+
+.dark {
+  background-color: var(--color-background-dark);
+  color: var(--color-foreground-dark);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes scroll-code {
+  0% {
+    transform: translateY(0);
+  }
+  100% {
+    transform: translateY(-50%);
+  }
+}

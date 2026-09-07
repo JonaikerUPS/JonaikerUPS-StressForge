@@ -1,0 +1,9 @@
+execution:
+- concurrency: 10
+  hold-for: 30s
+  scenario: dynamic-scenario
+scenarios:
+  dynamic-scenario:
+    requests:
+    - url: http://backend:8080
+      method: GET

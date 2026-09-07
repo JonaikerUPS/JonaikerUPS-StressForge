@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    // Layout del Proyecto
+    "rootDir": "src",
+    "outDir": "dist",
+
+    // Configuración del Entorno Moderno
+    "target": "es2024",                  // Cambiado para máxima compatibilidad y soporte moderno
+    "module": "nodenext",                // Mantiene el estándar de Node.js moderno
+    "moduleResolution": "nodenext",      // OBLIGATORIO cuando usas nodenext
+    "esModuleInterop": true,             // Permite importar paquetes CommonJS sin problemas
+    "lib": ["es2024"],                   // Define las librerías nativas globales de JS
+    "types": ["node"],                   // Habilita los tipos nativos de Node.js
+
+    // Outputs y Mapas
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Opciones Estrictas de Tipado
+    "strict": false,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+
+    // Opciones Recomendadas de Compilación
+    "jsx": "react-jsx",
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true                 // Evita revisar errores dentro de node_modules
+  },
+  "include": ["src/**/*"]                // Asegura que TypeScript solo busque dentro de tu carpeta src
+}

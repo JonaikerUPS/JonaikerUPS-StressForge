@@ -1,0 +1,47 @@
+services:
+  database:
+    image: mongo:7.0
+    container_name: stress_test_db
+    restart: always
+    ports: ["127.0.0.1:27017:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+    volumes: [mongo_data:/data/db]
+
+  backend:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    container_name: stress_test_backend
+    restart: always
+    ports: ["8080:8080"]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1.5G
+    environment:
+      - PORT=8080
+      - MONGO_URI=mongodb://admin:password123@database:27017/stress_tests?authSource=admin
+    volumes: ["./backend/src:/app/src", "./backend/package.json:/app/package.json", "./backend/tests:/tests"]
+    depends_on: [database, redis]
+
+  redis:
+    image: redis:7.4
+    container_name: stress_test_redis
+    restart: always
+    ports: ["127.0.0.1:6379:6379"]
+
+  frontend:
+    build: {context: ./frontend, dockerfile: Dockerfile}
+    container_name: stress_test_frontend
+    restart: always
+    ports: ["0.0.0.0:4000:3000"]
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
+      - NEXT_PUBLIC_API_URL=http://localhost:8080
+      - BACKEND_URL=http://backend:8080
+    volumes: ["./frontend/src:/app/src", "./frontend/public:/app/public", "./frontend/package.json:/app/package.json"]
+    depends_on: [backend]
+
+volumes:
+  mongo_data:
