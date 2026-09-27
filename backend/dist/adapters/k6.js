@@ -42,6 +42,7 @@ class K6Adapter {
             timestamp: Date.now(),
             latency: {
                 avg: this.accumulatedMetrics.count > 0 ? this.accumulatedMetrics.durationSum / this.accumulatedMetrics.count : 0,
+                p50: 0,
                 p95: 0,
                 p99: 0
             },
@@ -49,6 +50,9 @@ class K6Adapter {
             errorRate: this.accumulatedMetrics.count > 0 ? (this.accumulatedMetrics.failed / this.accumulatedMetrics.count) * 100 : 0,
             cpuUsage: 0,
             ramUsage: 0,
+            totalRequests: this.accumulatedMetrics.count,
+            successCount: this.accumulatedMetrics.count - this.accumulatedMetrics.failed,
+            failCount: this.accumulatedMetrics.failed,
         };
     }
 }

@@ -233,7 +233,7 @@ function HeaderControls() {
           <div className={`absolute right-0 top-11 z-[100] w-48 overflow-hidden rounded-2xl border p-1.5 shadow-2xl backdrop-blur-xl transition-all ${t('border-slate-800/80 bg-slate-900/95 shadow-black/50 ring-1 ring-white/5', 'border-slate-200/80 bg-white/95 shadow-slate-300/40 ring-1 ring-black/5')}`}>
             <button
               onClick={() => {
-                clearResults();
+                clearResults(undefined, { hard: true });
                 logout();
               }}
               className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${t('text-rose-400 hover:bg-rose-500/10', 'text-rose-600 hover:bg-rose-50')}`}
@@ -290,12 +290,28 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const [hasStoredAuth, setHasStoredAuth] = useState(false);
+
   useEffect(() => {
-    // Auth check logic
+    const stored = localStorage.getItem("admin-auth");
+    if (stored) setHasStoredAuth(true);
+  }, []);
+
+  useEffect(() => {
+    if (initialized) {
+      const stored = localStorage.getItem("admin-auth");
+      if (!isAuthenticated && !stored) {
+        router.replace('/home');
+      }
+    }
   }, [initialized, isAuthenticated, router]);
 
-  if (!initialized || !isAuthenticated) {
-    return null;
+  if (!initialized || (!isAuthenticated && !hasStoredAuth)) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-slate-950 text-white font-mono text-sm">
+        <span>Verificando credenciales...</span>
+      </div>
+    );
   }
 
   return (
@@ -319,7 +335,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               </div>
               <div>
                 <span className={`text-lg font-black tracking-tight ${t('text-white', 'text-slate-900')}`}>StressForge</span>
-                <p className={`text-[13px] font-mono font-bold tracking-widest uppercase -mt-0.5 ${t('text-slate-500', 'text-slate-400')}`}>Performance Lab</p>
+                <p className={`text-[10px] font-mono font-bold tracking-widest uppercase -mt-0.5 ${t('text-slate-500', 'text-slate-400')}`}>Performance Lab</p>
               </div>
             </div>
           )}

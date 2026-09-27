@@ -3,6 +3,9 @@ export const getBackendUrl = () => {
   if (typeof window === 'undefined') {
     return process.env.BACKEND_URL || 'http://backend:8080';
   }
-  // If running in the browser, use the public URL
-  return process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
+  if (process.env.NEXT_PUBLIC_BACKEND_URL) {
+    return process.env.NEXT_PUBLIC_BACKEND_URL;
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:8080`;
 };

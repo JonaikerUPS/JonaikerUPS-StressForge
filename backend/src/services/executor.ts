@@ -19,11 +19,13 @@ export const runStressTest = async (
   durationMs: number,
   endpoints?: { endpoint: string; method: string; requestBody?: string }[],
   requests?: number,
-  category: string = 'stress'
+  category: string = 'stress',
+  isCustomYaml?: boolean,
+  customYaml?: string
 ) => {
-  testEmitter.emit('test-started', { message: `Ejecutando ${toolsToRun.join(', ')} contra ${targetUrl}`, type: category });
-
   let test = await safeFindTest(testId);
+  const userId = test?.userId || null;
+  testEmitter.emit('test-started', { message: `Ejecutando ${toolsToRun.join(', ')} contra ${targetUrl}`, type: category, userId });
   if (test) {
     test.status = 'running';
     await safeSave(test);
@@ -48,7 +50,9 @@ export const runStressTest = async (
                   type: category,
                   requests: epConfig.requests > 0 ? epConfig.requests : requests,
                   rampUp: epConfig.rampUp || 0,
-                  endpoints: [ep]
+                  endpoints: [ep],
+                  isCustomYaml,
+                  customYaml
               });
           }
       } else {
@@ -60,7 +64,9 @@ export const runStressTest = async (
               durationMs: durationMs > 0 ? durationMs : 10000,
               type: category,
               requests: requests > 0 ? requests : 1,
-              endpoints: [{ endpoint: '/', method: 'GET' }]
+              endpoints: [{ endpoint: '/', method: 'GET' }],
+              isCustomYaml,
+              customYaml
           });
       }
   }
@@ -73,18 +79,18 @@ export const runStressTest = async (
     perEndpointResults = await runParallelTools(
         configs,
         (metrics) => {
-            testEmitter.emit('test-update', { type: 'metrics', data: metrics, testType: category });
+          testEmitter.emit('test-update', { type: 'metrics', data: metrics, testType: category, userId });
         },
         (tool, log) => {
             allLogs += `[${tool}] ${log}\n`;
             console.log(`[BACKEND DEBUG] Emitiendo test-update (log) para ${tool}: ${log}`);
-            testEmitter.emit('test-update', { type: 'log', tool, log, testType: category });
+            testEmitter.emit('test-update', { type: 'log', tool, log, testType: category, userId });
         },
         (tool, finalMetrics) => {
             if (finalMetrics) {
                 finalMetricsMap[tool] = finalMetrics;
             }
-            testEmitter.emit('test-update', { type: 'complete', tool, metrics: finalMetrics, testType: category });
+            testEmitter.emit('test-update', { type: 'complete', tool, metrics: finalMetrics, testType: category, userId });
         }
     );
   } catch (err: any) {
@@ -214,19 +220,30 @@ export const runStressTest = async (
       summary,
       finalMetrics: finalMetricsMap,
       rawOutput: allLogs,
-      testType: category
+      testType: category,
+      userId
   });
 
   // ... (antes de emitir test-data)
   console.log(`[DEBUG_EMIT] Emitiendo test-data con ${perEndpointResults.length} resultados encontrados para ${endpoints?.length} endpoints configurados`);
+
+  const normalizeEndpoint = (value: string) => value
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '')
+    .toLowerCase();
   
   testEmitter.emit('test-data', {
       type: 'complete',
       summary,
       metrics: finalMetricsMap,
       testType: category,
+      userId,
       endpoints: (endpoints || []).map((ep) => {
-          const match = perEndpointResults.find(r => r.url === ep.endpoint && r.method === (ep.method || 'GET'));
+          const endpointKey = normalizeEndpoint(ep.endpoint);
+          const match = perEndpointResults.find(r =>
+            normalizeEndpoint(r.url) === endpointKey && r.method === (ep.method || 'GET')
+          );
           
           if (match) {
             console.log(`[DEBUG_MATCH] Match encontrado para ${ep.endpoint}:`, match);

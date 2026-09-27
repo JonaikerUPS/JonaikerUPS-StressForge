@@ -123,6 +123,7 @@ export const parseHping3 = (log: string): ToolMetrics => {
   m.failCount = Math.max(0, total - recv);
   m.errorRate = total > 0 ? m.failCount / total : 0;
   m.rps = total;
+  m.errorDetails = `Prueba de estrés de red (DoS/SYN Flood): ${total} paquetes enviados, ${recv} recibidos. Pérdida: ${(m.errorRate * 100).toFixed(1)}%.`;
   m.rawOutput = log;
   return m;
 };
@@ -140,6 +141,7 @@ export const parseSiege = (log: string): ToolMetrics => {
   m.failCount = fail;
   m.errorRate = total > 0 ? fail / total : 0;
   m.rps = total / Math.max(1, (log.match(/^Elapsed time:\s+([\d.]+)/im) ? parseFloat((log.match(/^Elapsed time:\s+([\d.]+)/im) || ['', '1'])[1]) : 10));
+  m.errorDetails = `Resistencia Siege: ${total} transacciones, Disponibilidad: ${avail ? avail[1] : 'N/A'}%.`;
   m.rawOutput = log;
   return m;
 };
@@ -157,6 +159,7 @@ export const parseAb = (log: string): ToolMetrics => {
   m.failCount = fail;
   m.errorRate = total > 0 ? fail / total : 0;
   m.rps = rps ? parseFloat(rps[1]) : 0;
+  m.errorDetails = `Apache Bench (Ab) Carga límite: ${total} completadas, ${fail} fallidas. Rendimiento: ${m.rps.toFixed(1)} req/s.`;
   m.rawOutput = log;
   return m;
 };
@@ -169,6 +172,7 @@ export const parseSlowloris = (log: string): ToolMetrics => {
   m.successCount = sent.length;
   m.failCount = 0;
   m.rps = sent.length;
+  m.errorDetails = `Ataque Slowloris / HTTP Dos lento: Se mantuvieron ${sent.length} conexiones simultáneas abiertas evaluando resistencia ante agotamiento de sockets.`;
   m.rawOutput = log;
   return m;
 };

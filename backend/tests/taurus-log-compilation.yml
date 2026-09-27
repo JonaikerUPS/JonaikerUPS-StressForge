@@ -1,0 +1,35 @@
+execution:
+  - scenario: log-compilation-test
+    concurrency: 1
+    ramp-up: 2s
+    hold-for: 10s
+    iterations: 3
+
+scenarios:
+  log-compilation-test:
+    requests:
+      - url: https://foro-kit-educativo.alcaravan.com.ve/api/kit-mac/log-compilation/
+        method: POST
+        ignore-ssl-errors: true
+        headers:
+          Content-Type: application/json
+        json:
+          mac_address: "8A:1C:4E:92:DF:03"
+          user_id: null
+          interaction_time: 456
+          compilation_success: true
+          refinement_index: 0.4
+          conceptual_effectiveness: 2.24
+          complexity_final: 17
+          complexity_accumulated: 42
+          interaction_time_minutes: 7.6
+          blocks_created_total: 15
+          blocks_deleted_total: 8
+          blocks_final_count: 7
+
+reporting:
+  - module: console
+  - module: final-stats
+    summary: true
+    percentiles: true
+    test-duration: true

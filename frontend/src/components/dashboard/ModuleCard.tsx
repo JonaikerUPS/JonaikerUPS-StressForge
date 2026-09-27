@@ -17,13 +17,13 @@ interface ModuleCardProps {
 }
 
 const getPalette = (isDarkMode: boolean) => ({
-  sky:     { bg: "bg-sky-500/12",     iconColor: "text-sky-500",     border: isDarkMode ? "hover:border-sky-500/30" : "hover:border-sky-400/50", glow: "from-sky-500/10", text: isDarkMode ? "text-sky-400" : "text-sky-600", glowHex: "#0ea5e9", completedBg: "bg-sky-500/5",     completedBorder: isDarkMode ? "border-sky-500/20" : "border-sky-400/30" },
-  emerald: { bg: "bg-emerald-500/12", iconColor: "text-emerald-500", border: isDarkMode ? "hover:border-emerald-500/30" : "hover:border-emerald-400/50", glow: "from-emerald-500/10", text: isDarkMode ? "text-emerald-400" : "text-emerald-600", glowHex: "#10b981", completedBg: "bg-emerald-500/5", completedBorder: isDarkMode ? "border-emerald-500/20" : "border-emerald-400/30" },
-  amber:   { bg: "bg-amber-500/12",   iconColor: "text-amber-500",   border: isDarkMode ? "hover:border-amber-500/30" : "hover:border-amber-400/50",   glow: "from-amber-500/10",   text: isDarkMode ? "text-amber-400" : "text-amber-600",   glowHex: "#f59e0b", completedBg: "bg-amber-500/5",   completedBorder: isDarkMode ? "border-amber-500/20" : "border-amber-400/30"   },
-  purple:  { bg: "bg-purple-500/12",  iconColor: "text-purple-500",  border: isDarkMode ? "hover:border-purple-500/30" : "hover:border-purple-400/50",  glow: "from-purple-500/10",  text: isDarkMode ? "text-purple-400" : "text-purple-600",  glowHex: "#8b5cf6", completedBg: "bg-purple-500/5",  completedBorder: isDarkMode ? "border-purple-500/20" : "border-purple-400/30"  },
-  cyan:    { bg: "bg-cyan-500/12",    iconColor: "text-cyan-500",    border: isDarkMode ? "hover:border-cyan-500/30" : "hover:border-cyan-400/50",    glow: "from-cyan-500/10",    text: isDarkMode ? "text-cyan-400" : "text-cyan-600",    glowHex: "#06b6d4", completedBg: "bg-cyan-500/5",    completedBorder: isDarkMode ? "border-cyan-500/20" : "border-cyan-400/30"    },
-  rose:    { bg: "bg-rose-500/12",    iconColor: "text-rose-500",    border: isDarkMode ? "hover:border-rose-500/30" : "hover:border-rose-400/50",    glow: "from-rose-500/10",    text: isDarkMode ? "text-rose-400" : "text-rose-600",    glowHex: "#f43f5e", completedBg: "bg-rose-500/5",    completedBorder: isDarkMode ? "border-rose-500/20" : "border-rose-400/30"    },
-  pink:    { bg: "bg-pink-500/12",    iconColor: "text-pink-500",    border: isDarkMode ? "hover:border-pink-500/30" : "hover:border-pink-400/50",    glow: "from-pink-500/10",    text: isDarkMode ? "text-pink-400" : "text-pink-600",    glowHex: "#ec4899", completedBg: "bg-pink-500/5",    completedBorder: isDarkMode ? "border-pink-500/20" : "border-pink-400/30"    },
+  sky:     { bg: "bg-sky-500/12",     iconColor: "text-sky-500",     border: isDarkMode ? "hover:border-sky-500/30" : "hover:border-sky-500/30", glow: "from-sky-500/10", text: isDarkMode ? "text-sky-400" : "text-sky-800", glowHex: "#0ea5e9", completedBg: "bg-sky-500/5",     completedBorder: isDarkMode ? "border-sky-500/20" : "border-sky-800/30" },
+  emerald: { bg: "bg-emerald-500/12", iconColor: "text-emerald-500", border: isDarkMode ? "hover:border-emerald-500/30" : "hover:border-emerald-500/30", glow: "from-emerald-500/10", text: isDarkMode ? "text-emerald-400" : "text-emerald-800", glowHex: "#10b981", completedBg: "bg-emerald-500/5", completedBorder: isDarkMode ? "border-emerald-500/20" : "border-emerald-800/30" },
+  amber:   { bg: "bg-amber-500/12",   iconColor: "text-amber-500",   border: isDarkMode ? "hover:border-amber-500/30" : "hover:border-amber-500/30",   glow: "from-amber-500/10",   text: isDarkMode ? "text-amber-400" : "text-amber-800",   glowHex: "#f59e0b", completedBg: "bg-amber-500/5",   completedBorder: isDarkMode ? "border-amber-500/20" : "border-amber-800/30"   },
+  purple:  { bg: "bg-purple-500/12",  iconColor: "text-purple-500",  border: isDarkMode ? "hover:border-purple-500/30" : "hover:border-purple-500/30",  glow: "from-purple-500/10",  text: isDarkMode ? "text-purple-400" : "text-purple-800",  glowHex: "#8b5cf6", completedBg: "bg-purple-500/5",  completedBorder: isDarkMode ? "border-purple-500/20" : "border-purple-800/30"  },
+  cyan:    { bg: "bg-cyan-500/12",    iconColor: "text-cyan-500",    border: isDarkMode ? "hover:border-cyan-500/30" : "hover:border-cyan-500/30",    glow: "from-cyan-500/10",    text: isDarkMode ? "text-cyan-400" : "text-cyan-800",    glowHex: "#0ea5e9", completedBg: "bg-cyan-500/5",    completedBorder: isDarkMode ? "border-cyan-500/20" : "border-cyan-800/30"    },
+  rose:    { bg: "bg-rose-500/12",    iconColor: "text-rose-500",    border: isDarkMode ? "hover:border-rose-500/30" : "hover:border-rose-500/30",    glow: "from-rose-500/10",    text: isDarkMode ? "text-rose-400" : "text-rose-800",    glowHex: "#f43f5e", completedBg: "bg-rose-500/5",    completedBorder: isDarkMode ? "border-rose-500/20" : "border-rose-800/30"    },
+  pink:    { bg: "bg-pink-500/12",    iconColor: "text-pink-500",    border: isDarkMode ? "hover:border-pink-500/30" : "hover:border-pink-500/30",    glow: "from-pink-500/10",    text: isDarkMode ? "text-pink-400" : "text-pink-800",    glowHex: "#ec4899", completedBg: "bg-pink-500/5",    completedBorder: isDarkMode ? "border-pink-500/20" : "border-pink-800/30"    },
 });
 
 export default function ModuleCard({
@@ -35,15 +35,12 @@ export default function ModuleCard({
   const t = (dark: string, light: string) => isDarkMode ? dark : light;
   
   const palette = getPalette(isDarkMode);
-  const p = (palette as any)[color] ?? palette.sky;
+  const p = palette[color as keyof ReturnType<typeof getPalette>] ?? palette.sky;
 
   return (
     <Link
       href={href}
-      className={`group relative overflow-hidden rounded-2xl border p-5 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${t('bg-slate-900/50 hover:bg-slate-900/80', 'bg-white/80 hover:bg-white/95')} ${completed
-          ? `${p.completedBorder} ${p.completedBg}`
-          : `border-slate-200/60 ${t('border-white/6', '')} ${p.border}`
-        }`}
+      className={`group relative overflow-hidden rounded-2xl border p-5 shadow-sm backdrop-blur-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg ${t('bg-slate-900/50 hover:bg-slate-900/80', 'bg-white/90 hover:bg-white/100')} ${completed ? `${p.completedBorder} ${p.completedBg}` : `border-slate-300/70 ${t('border-slate-300/70', '')} ${p.border}`}`}
     >
       {/* Corner radial glow */}
       <div
@@ -90,7 +87,7 @@ export default function ModuleCard({
       <div className="mt-4 min-h-[40px]">
         {completed && primaryStat ? (
           <>
-            <p className={`text-sm font-bold ${t('text-slate-100', 'text-slate-800')}`}>{primaryStat}</p>
+            <p className={`text-sm font-bold ${t('text-slate-900', 'text-slate-900')}`}>{primaryStat}</p>
             {secondaryStat && (
               <p className={`text-[11px] mt-0.5 line-clamp-1 ${t('text-slate-500', 'text-slate-400')}`}>{secondaryStat}</p>
             )}
@@ -103,8 +100,8 @@ export default function ModuleCard({
       {/* Footer */}
       <div className={`mt-4 flex items-center justify-between border-t pt-3 text-[10px] font-semibold transition-colors ${
         completed
-          ? `border-slate-200/60 ${t('border-white/5', '')} ${p.text}`
-          : `${t('border-white/4', 'border-slate-100')} ${t('text-slate-500', 'text-slate-400')} group-hover:` + p.text.split(" ")[0]
+          ? `border-slate-300/70 ${t('border-slate-300/70', '')} ${p.text}`
+          : `${t('border-slate-300/70', 'border-slate-300')} ${t('text-slate-600', 'text-slate-600')} group-hover:` + p.text.split(" ")[0]
       }`}>
         <span className="group-hover:underline underline-offset-2">{completed ? "Ver resultados" : "Ir a la herramienta"}</span>
         <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />

@@ -13,7 +13,7 @@ services:
     build: {context: ./backend, dockerfile: Dockerfile}
     container_name: stress_test_backend
     restart: always
-    ports: ["8080:8080"]
+    ports: ["0.0.0.0:8080:8080"]
     deploy:
       resources:
         limits:
@@ -37,8 +37,6 @@ services:
     restart: always
     ports: ["0.0.0.0:4000:3000"]
     environment:
-      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8080
-      - NEXT_PUBLIC_API_URL=http://localhost:8080
       - BACKEND_URL=http://backend:8080
     volumes: ["./frontend/src:/app/src", "./frontend/public:/app/public", "./frontend/package.json:/app/package.json"]
     depends_on: [backend]

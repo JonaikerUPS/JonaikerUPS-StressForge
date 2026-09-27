@@ -5,8 +5,8 @@ WORKDIR /app
 # Instalar dependencias del sistema necesarias
 RUN apk update && apk add --no-cache curl git go musl-dev openjdk17-jdk openjdk17-jmods libc6-compat python3 py3-pip unzip python3-dev build-base
 
-# Instalar Python tools (taurus, locust)
-RUN pip3 install --break-system-packages bzt locust
+# Instalar Python tools (taurus, locust) actualizados
+RUN pip3 install --break-system-packages --upgrade bzt locust
 
 # Instalar k6
 RUN curl -L https://github.com/grafana/k6/releases/download/v0.56.0/k6-v0.56.0-linux-amd64.tar.gz -o /tmp/k6.tar.gz && \

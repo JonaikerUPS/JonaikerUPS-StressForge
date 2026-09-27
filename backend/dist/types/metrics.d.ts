@@ -3,8 +3,9 @@ export interface UnifiedMetrics {
     timestamp: number;
     latency: {
         avg: number;
+        p50?: number;
         p95: number;
-        p99: number;
+        p99?: number;
     };
     throughput: number;
     errorRate: number;
@@ -12,9 +13,13 @@ export interface UnifiedMetrics {
     ramUsage: number;
     concurrency?: number;
     duration?: number;
+    totalRequests?: number;
+    successCount?: number;
+    failCount?: number;
     endpoints?: any[];
     rawOutput?: string;
     percentiles?: Record<string, number>;
     requestStats?: any[];
+    errorDetails?: string;
 }
 //# sourceMappingURL=metrics.d.ts.map

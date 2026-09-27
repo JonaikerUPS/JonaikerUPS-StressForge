@@ -12,6 +12,83 @@ function debugLog(msg: string) {
     fs.appendFileSync('debug.log', `[${new Date().toISOString()}] ${msg}\n`);
 }
 
+function sanitizeBody(bodyStr: string): string {
+    if (!bodyStr) return '{}';
+    try {
+        const obj = typeof bodyStr === 'object' ? bodyStr : JSON.parse(bodyStr);
+        const sanitizeRecursive = (item: any) => {
+            if (item && typeof item === 'object' && item !== null) {
+                for (const k of Object.keys(item)) {
+                    if (item[k] === "") {
+                        item[k] = null;
+                    } else if (typeof item[k] === 'object' && item[k] !== null) {
+                        sanitizeRecursive(item[k]);
+                    }
+                }
+            }
+        };
+        sanitizeRecursive(obj);
+        return JSON.stringify(obj);
+    } catch {
+        return bodyStr;
+    }
+}
+
+function preprocessTaurusYaml(content: string): string {
+    if (!content) return content;
+    let processed = content;
+
+    // Ensure trailing slash on URLs if missing for API routes
+    processed = processed.replace(/url:\s*(https?:\/\/[^\s]+)/g, (match, url) => {
+        let cleanUrl = url.trim();
+        if (cleanUrl.includes('/api/') && !cleanUrl.endsWith('/') && !cleanUrl.includes('?')) {
+            cleanUrl += '/';
+        }
+        return 'url: ' + cleanUrl;
+    });
+
+    // Ensure ignore-ssl-errors: true is added to requests
+    if (!processed.includes('ignore-ssl-errors')) {
+        processed = processed.replace(/method:\s*(POST|GET|PUT|DELETE|PATCH)/gi, 'method: $1\n        ignore-ssl-errors: true');
+    }
+
+    // Find and sanitize JSON inside body: | or body: blocks
+    processed = processed.replace(/body:\s*\|([\s\S]*?)(?=\n\s*(?:method|headers|url|requests|scenarios|execution)|$)/g, (match, bodyContent) => {
+        try {
+            const jsonStartIndex = bodyContent.indexOf('{');
+            const jsonEndIndex = bodyContent.lastIndexOf('}');
+            if (jsonStartIndex !== -1 && jsonEndIndex !== -1) {
+                const jsonStr = bodyContent.substring(jsonStartIndex, jsonEndIndex + 1);
+                const jsonObj = JSON.parse(jsonStr);
+                
+                const sanitizeRecursive = (item: any) => {
+                    if (item && typeof item === 'object' && item !== null) {
+                        for (const k of Object.keys(item)) {
+                            if (item[k] === "") {
+                                item[k] = null;
+                            } else if (typeof item[k] === 'object' && item[k] !== null) {
+                                sanitizeRecursive(item[k]);
+                            }
+                        }
+                    }
+                };
+                sanitizeRecursive(jsonObj);
+                
+                const formattedJson = JSON.stringify(jsonObj, null, 2)
+                    .split('\n')
+                    .map(line => '        ' + line)
+                    .join('\n');
+                return 'json:\n' + formattedJson;
+            }
+        } catch (e) {
+            debugLog(`Error preprocessing custom YAML body JSON: ${e}`);
+        }
+        return match;
+    });
+
+    return processed;
+}
+
 export type TestTool = 'jmeter' | 'locust' | 'k6' | 'artillery' | 'taurus' | 'hey' | 'bombardier' | 'vegeta' | 'gatling' | 'autocannon' | 'simulacion'
   | 'nmap' | 'masscan' | 'nikto' | 'hydra' | 'sqlmap' | 'gobuster' | 'wfuzz' | 'ffuf' | 'hping3' | 'ab' | 'slowloris';
 
@@ -31,6 +108,10 @@ export interface TestConfig {
   maxLatency?: number;
   isCustomYaml?: boolean;
   customYaml?: string;
+  payloadType?: 'JSON' | 'Form URL-Encoded' | 'XML' | 'Cargar Archivo';
+  filePath?: string;
+  isMultipart?: boolean;
+  fileParamName?: string;
 }
 
 export interface PerEndpointMetrics {
@@ -191,6 +272,68 @@ function parseMetricsFromOutput(tool: string, output: string): UnifiedMetrics | 
    });
  }
 
+function normalizeFinalMetrics(
+  metrics: UnifiedMetrics,
+  output: string,
+  config: TestConfig,
+  durationSec: number
+): UnifiedMetrics {
+  const normalizedOutput = output.replace(/,/g, '');
+  let totalRequests = Number(metrics.totalRequests) || 0;
+  let failCount = Number(metrics.failCount) || 0;
+
+  // Common formats shared by k6, HTTP tools and JMeter-like runners.
+  if (totalRequests <= 0) {
+    const requestMatch = normalizedOutput.match(
+      /(?:http_reqs|requests completed|complete requests|total requests|iterations)\D+(\d+(?:\.\d+)?)/i
+    );
+    const genericMatch = normalizedOutput.match(/(\d+(?:\.\d+)?)\s+(?:requests|reqs)\b/i);
+    totalRequests = requestMatch
+      ? Math.round(Number(requestMatch[1]))
+      : genericMatch
+        ? Math.round(Number(genericMatch[1]))
+        : 0;
+  }
+
+  if (failCount <= 0) {
+    const failureMatch = normalizedOutput.match(
+      /(?:failed requests|errors|failures|http_req_failed)\D+(\d+)/i
+    );
+    if (failureMatch) failCount = Number(failureMatch[1]) || 0;
+  }
+
+  // Some tools only print errors and omit their final counters.
+  if (totalRequests <= 0 && output.trim()) {
+    const plannedRequests = Number(config.requests) || 0;
+    totalRequests = plannedRequests || Math.max(1, (config.concurrency || 1) * durationSec);
+    if (/(request timeout|request failed|error|failed|exception)/i.test(normalizedOutput)) {
+      failCount = Math.min(totalRequests, Math.max(failCount, totalRequests));
+    }
+  }
+
+  totalRequests = Math.max(0, Math.round(totalRequests));
+  failCount = Math.min(totalRequests, Math.max(0, Math.round(failCount)));
+  const successCount = Math.max(0, totalRequests - failCount);
+  const avgLatency = Number(metrics.latency?.avg) || 0;
+  const throughput = Number(metrics.throughput) || (totalRequests > 0 ? totalRequests / Math.max(1, durationSec) : 0);
+
+  return {
+    ...metrics,
+    totalRequests,
+    successCount,
+    failCount,
+    errorRate: totalRequests > 0 ? (failCount / totalRequests) * 100 : 0,
+    throughput,
+    latency: {
+      avg: avgLatency,
+      p50: Number(metrics.latency?.p50) || avgLatency,
+      p95: Number(metrics.latency?.p95) || avgLatency,
+      p99: Number(metrics.latency?.p99) || avgLatency,
+    },
+    rawOutput: output,
+  };
+}
+
 function runToolProcess(
   config: TestConfig,
   onLog: (tool: TestTool, log: string) => void,
@@ -275,9 +418,15 @@ function runToolProcess(
       clearInterval(metricInterval);
       onLog(config.tool, `Finalizado con código ${code}, señal ${signal}`);
       const metrics = parseMetricsFromOutput(config.tool, fullOutput);
-      const finalM = metrics || baseMetrics(config.tool);
+      const duration = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
+      const finalM = normalizeFinalMetrics(
+        metrics || baseMetrics(config.tool),
+        fullOutput,
+        config,
+        duration
+      );
       finalM.concurrency = config.concurrency || 1;
-      finalM.duration = Math.max(1, Math.floor((Date.now() - startTime) / 1000));
+      finalM.duration = duration;
       resolve(finalM);
     });
 
@@ -328,83 +477,252 @@ function getCommand(config: TestConfig): string {
     debugLog(`Error extracting host from ${localUrl}: ${e}`);
   }
 
+  const ep = config.endpoints?.[0] || { endpoint: config.targetUrl, method: 'GET', requestBody: config.body };
+  const method = (ep.method || 'GET').toUpperCase();
+  const body = sanitizeBody(ep.requestBody || config.body || '{}');
+  const escapedBody = body ? body.replace(/'/g, "'\\''") : '{}';
+
+  let targetEndpoint = ep.endpoint || localUrl;
+  try {
+      if (!targetEndpoint.startsWith('http')) {
+          targetEndpoint = 'http://' + targetEndpoint;
+      }
+      const u = new URL(targetEndpoint);
+      if (u.hostname === 'localhost') {
+          u.hostname = 'backend';
+      }
+      targetEndpoint = u.toString();
+  } catch {
+      targetEndpoint = ep.endpoint || localUrl;
+  }
+
+  let baseAddress = localUrl;
+  let epPath = '/';
+  try {
+      const fullEp = targetEndpoint.startsWith('http') ? targetEndpoint : 'http://' + targetEndpoint;
+      const u = new URL(fullEp);
+      baseAddress = u.origin;
+      epPath = (u.pathname + u.search) || '/';
+  } catch {
+      baseAddress = localUrl;
+      epPath = ep.endpoint || '/';
+  }
+
   switch (tool) {
-    case 'k6': 
+    case 'k6': {
       return rampSec > 0 
-        ? `k6 run -u ${concurrency} --stage ${rampSec}s:${concurrency},${durSec - rampSec}s:${concurrency} /tests/k6-test.js -e TARGET_URL=${localUrl} --summary-trend-stats="min,max,avg,p(90),p(95),p(99)" 2>&1`
-        : `k6 run -u ${concurrency} --duration ${durSec}s /tests/k6-test.js -e TARGET_URL=${localUrl} --summary-trend-stats="min,max,avg,p(90),p(95),p(99)" 2>&1`;
+        ? `k6 run -u ${concurrency} --stage ${rampSec}s:${concurrency},${durSec - rampSec}s:${concurrency} /app/tests/k6-test.js -e TARGET_URL=${targetEndpoint} -e METHOD=${method} -e BODY='${escapedBody}' --summary-trend-stats="min,max,avg,p(90),p(95),p(99)" 2>&1`
+        : `k6 run -u ${concurrency} --duration ${durSec}s /app/tests/k6-test.js -e TARGET_URL=${targetEndpoint} -e METHOD=${method} -e BODY='${escapedBody}' --summary-trend-stats="min,max,avg,p(90),p(95),p(99)" 2>&1`;
+    }
     
-    case 'artillery': 
-        return `TARGET_URL=${localUrl} DURATION=${durSec} CONCURRENCY=${concurrency} npx artillery run /app/tests/artillery-config.yml 2>&1`;
+    case 'artillery': {
+      let jsonPart = '';
+      if (body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+          try {
+              JSON.parse(body);
+              jsonPart = `json: ${body}`;
+          } catch {
+              jsonPart = `body: "${body.replace(/"/g, '\\"')}"`;
+          }
+      }
+      const artYaml = `config:
+  target: "${baseAddress}"
+  phases:
+    - duration: ${durSec}
+      arrivalRate: ${concurrency}
+scenarios:
+  - flow:
+    - ${method.toLowerCase()}:
+        url: "${epPath}"
+        ${jsonPart}
+`;
+      const artPath = `/app/tests/artillery-config.yml`;
+      fs.writeFileSync(artPath, artYaml);
+      return `npx artillery run ${artPath} 2>&1`;
+    }
     
-    case 'autocannon': 
-        return `npx autocannon -c ${concurrency} -d ${durSec} "${localUrl}" 2>&1`;
+    case 'autocannon': {
+      const bodyArg = escapedBody && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? `-b '${escapedBody}' -H "Content-Type: application/json"` : '';
+      return `npx autocannon -c ${concurrency} -d ${durSec} -m ${method} ${bodyArg} "${targetEndpoint}" 2>&1`;
+    }
     
-    case 'hey': 
-        return `hey -n ${reqCount} -c ${concurrency} "${localUrl}" 2>&1`;
+    case 'hey': {
+      const bodyArg = escapedBody && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? `-d '${escapedBody}' -H "Content-Type: application/json"` : '';
+      return `hey -n ${reqCount} -c ${concurrency} -m ${method} ${bodyArg} "${targetEndpoint}" 2>&1`;
+    }
     
-    case 'vegeta': 
-        return `echo "GET ${localUrl}" | vegeta attack -rate=${concurrency} -duration=${durSec}s | vegeta report -type=text 2>&1`;
+    case 'vegeta': {
+      const vegetaReqFile = `/tmp/vegeta-req-${Date.now()}.txt`;
+      if (body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+          const bodyFile = `/tmp/body-${Date.now()}.json`;
+          fs.writeFileSync(bodyFile, body);
+          const reqText = `${method} ${targetEndpoint}\nContent-Type: application/json\n@${bodyFile}`;
+          fs.writeFileSync(vegetaReqFile, reqText);
+      } else {
+          fs.writeFileSync(vegetaReqFile, `${method} ${targetEndpoint}`);
+      }
+      return `vegeta attack -rate=${concurrency} -duration=${durSec}s -inputs=${vegetaReqFile} | vegeta report -type=text 2>&1`;
+    }
     
-    case 'bombardier': 
-        return `bombardier -c ${concurrency} -n ${reqCount} "${localUrl}" 2>&1`;
+    case 'bombardier': {
+      const bodyArg = escapedBody && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? `-b '${escapedBody}' -H "Content-Type: application/json"` : '';
+      return `bombardier -c ${concurrency} -n ${reqCount} -m ${method} ${bodyArg} "${targetEndpoint}" 2>&1`;
+    }
     
-    case 'jmeter': 
-        const jmUrl = new URL(localUrl);
-        return `jmeter -n -t /app/tests/plan.jmx -Jconcurrency=${concurrency} -JrampUp=${rampSec} -Jduration=${durSec} -Jdomain=${jmUrl.hostname} -Jport=${jmUrl.port || (jmUrl.protocol === 'https:' ? '443' : '80')} 2>&1`;
+    case 'jmeter': {
+      const jmUrl = new URL(targetEndpoint);
+      return `jmeter -n -t /app/tests/plan.jmx -Jconcurrency=${concurrency} -JrampUp=${rampSec} -Jduration=${durSec} -Jdomain=${jmUrl.hostname} -Jport=${jmUrl.port || (jmUrl.protocol === 'https:' ? '443' : '80')} 2>&1`;
+    }
     
-    case 'locust': 
-        return `locust -f /app/tests/locustfile.py --headless -u ${concurrency} -r ${concurrency} --run-time ${durSec}s --host ${localUrl} 2>&1`;
+    case 'locust': {
+      return `TEST_TARGET_URL='${epPath}' TEST_METHOD=${method} TEST_BODY='${escapedBody}' locust -f /app/tests/locustfile.py --headless -u ${concurrency} -r ${concurrency} --run-time ${durSec}s --host ${baseAddress} 2>&1`;
+    }
     
-    case 'taurus':
-        if (config.isCustomYaml && config.customYaml) {
+    case 'taurus': {
+        const customYamlCandidate = config.customYaml || (config.body && (config.body.includes('execution:') || config.body.includes('scenarios:')) ? config.body : null);
+        if ((config.isCustomYaml || customYamlCandidate) && customYamlCandidate) {
             const configPath = `/tmp/taurus-custom-${Date.now()}.yml`;
-            fs.writeFileSync(configPath, config.customYaml);
+            const processedYaml = preprocessTaurusYaml(customYamlCandidate);
+            fs.writeFileSync(configPath, processedYaml);
+            debugLog(`Using preprocessed custom Taurus YAML: ${processedYaml}`);
             return `bzt ${configPath} 2>&1`;
         }
 
         const configPath = `/tmp/taurus-${Date.now()}.yml`;
-        // Intentamos parsear headers y body si vienen como string
-        let headersObj = {};
-        try { headersObj = config.headers ? JSON.parse(config.headers) : {}; } catch(e) { debugLog('Error parsing headers'); }
-        
+        let baseHeaders: Record<string, string> = {};
+        try { 
+            if (typeof config.headers === 'string') {
+                baseHeaders = JSON.parse(config.headers);
+            } else if (config.headers && typeof config.headers === 'object') {
+                baseHeaders = { ...(config.headers as Record<string, string>) };
+            }
+        } catch(e) { 
+            debugLog('Error parsing headers'); 
+        }
+
+        let baseAddress = localUrl;
+        try {
+            const u = new URL(localUrl);
+            baseAddress = u.origin;
+        } catch {}
+
+        const endpoints = config.endpoints && config.endpoints.length > 0
+            ? config.endpoints
+            : [{ endpoint: localUrl, method: method, requestBody: body }];
+
+        const requestsYaml = endpoints.map((ep) => {
+            let epMethod = (ep.method || method || 'GET').toUpperCase();
+            let epUrl = ep.endpoint || localUrl;
+            try {
+                if (ep.endpoint && !ep.endpoint.startsWith('http')) {
+                    const cleanBase = baseAddress.endsWith('/') ? baseAddress.slice(0, -1) : baseAddress;
+                    const cleanEp = ep.endpoint.startsWith('/') ? ep.endpoint : '/' + ep.endpoint;
+                    epUrl = cleanBase + cleanEp;
+                }
+            } catch {
+                epUrl = ep.endpoint || localUrl;
+            }
+
+            let epHeaders: Record<string, string> = { ...baseHeaders };
+            let epBodyLines = '';
+            const epHasBody = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(epMethod);
+            const epPayload = ep.requestBody !== undefined ? ep.requestBody : body;
+            const epPayloadType = config.payloadType || (String(epPayload).trim().startsWith('<') ? 'XML' : 'JSON');
+
+            if (epHasBody) {
+                switch (epPayloadType) {
+                    case 'JSON': {
+                        epHeaders['Content-Type'] = 'application/json';
+                        const sanitizedPayload = sanitizeBody(typeof epPayload === 'object' ? JSON.stringify(epPayload) : (epPayload || '{}'));
+                        let jsonObj: any;
+                        try {
+                            jsonObj = JSON.parse(sanitizedPayload);
+                        } catch {
+                            jsonObj = { raw: epPayload || '' };
+                        }
+                        const jsonFormatted = JSON.stringify(jsonObj, null, 2)
+                            .split('\n')
+                            .map(line => `            ${line}`)
+                            .join('\n');
+                        epBodyLines = `        json:\n${jsonFormatted}`;
+                        break;
+                    }
+                    case 'Form URL-Encoded': {
+                        epHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
+                        let urlEncodedStr = '';
+                        if (typeof epPayload === 'object' && epPayload !== null) {
+                            urlEncodedStr = Object.entries(epPayload)
+                                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+                                .join('&');
+                        } else {
+                            urlEncodedStr = String(epPayload || '');
+                        }
+                        epBodyLines = `        body: "${urlEncodedStr.replace(/"/g, '\\"')}"`;
+                        break;
+                    }
+                    case 'XML': {
+                        epHeaders['Content-Type'] = 'application/xml';
+                        const xmlStr = String(epPayload || '<root></root>');
+                        const xmlMultiline = xmlStr
+                            .split('\n')
+                            .map(line => `            ${line}`)
+                            .join('\n');
+                        epBodyLines = `        body: |\n${xmlMultiline}`;
+                        break;
+                    }
+                    case 'Cargar Archivo': {
+                        if (config.isMultipart) {
+                            const param = config.fileParamName || 'file';
+                            const filePath = config.filePath || String(epPayload || '/ruta/al/archivo');
+                            epBodyLines = `        upload-files:\n          - param: ${param}\n            path: "${filePath}"`;
+                        } else {
+                            const filePath = config.filePath || String(epPayload || '/ruta/al/archivo');
+                            epBodyLines = `        body-file: "${filePath}"`;
+                        }
+                        break;
+                    }
+                    default: {
+                        epHeaders['Content-Type'] = 'application/json';
+                        epBodyLines = `        body: '${String(epPayload || '{}').replace(/'/g, "\\'")}'`;
+                        break;
+                    }
+                }
+            }
+
+            let epHeadersLines = '';
+            const epHeaderEntries = Object.entries(epHeaders);
+            if (epHeaderEntries.length > 0) {
+                epHeadersLines = `        headers:\n` + epHeaderEntries.map(([k, v]) => `          ${k}: ${v}`).join('\n');
+            }
+
+            return `      - url: ${epUrl}\n        method: ${epMethod}\n${epHeadersLines ? epHeadersLines + '\n' : ''}${epBodyLines}`;
+        }).join('\n');
+
         const taurusYaml = `
 execution:
   - executor: locust
-    scenario: simple-load
     concurrency: ${concurrency}
     ramp-up: ${rampSec}s
     hold-for: ${durSec}s
+    scenario: stress-test
 
 scenarios:
-  simple-load:
-    default-address: ${localUrl}
+  stress-test:
     requests:
-${(config.endpoints && config.endpoints.length > 0 ? config.endpoints : [{endpoint: '/', method: 'GET'}]).map(ep => {
-      let url = ep.endpoint;
-      if (!url.startsWith('http') && !url.startsWith('/')) {
-        url = '/' + url;
-      }
-      return `      - url: ${url}
-        method: ${ep.method || 'GET'}
-        headers:
-${Object.entries(headersObj).map(([k, v]) => `          ${k}: ${v}`).join('\n') || '          Content-Type: application/json'}
-        ${ep.method !== 'GET' ? `body: '${config.body || '{}'}'` : ''}`;
-    }).join('\n')}
+${requestsYaml}
 
 reporting:
-  - module: final-stats
   - module: console
+  - module: final-stats
+    summary: true
+    percentiles: true
+    test-duration: true
+`.trim();
 
-settings:
-  check-interval: 1s
-
-criteria:
-  - avg-rt>${config.maxLatency || 500}ms
-`;
         fs.writeFileSync(configPath, taurusYaml);
         debugLog(`Generated Taurus YAML: ${taurusYaml}`);
         return `bzt ${configPath} 2>&1`;
+    }
 
     case 'nmap':
         return `nmap -sV -sC -Pn -T4 --top-ports ${reqCount > 100 ? 1000 : reqCount} "${host}" -p ${port} 2>&1`;

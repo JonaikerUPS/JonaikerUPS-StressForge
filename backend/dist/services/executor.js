@@ -2,40 +2,270 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runStressTest = void 0;
 const TestRun_1 = require("../models/TestRun");
+const TestResult_1 = require("../models/TestResult");
 const tool_runner_1 = require("./tool-runner");
 const monitor_1 = require("./monitor");
 const emitter_1 = require("./emitter");
-const runStressTest = async (testId, toolsToRun) => {
+async function safeFindTest(testId) {
     try {
-        const test = await TestRun_1.TestRun.findById(testId);
-        if (!test)
-            return;
+        return await TestRun_1.TestRun.findById(testId);
+    }
+    catch {
+        return null;
+    }
+}
+async function safeSave(doc) {
+    try {
+        await doc.save();
+    }
+    catch { /* noop */ }
+}
+const runStressTest = async (testId, toolsToRun, targetUrl, concurrency, durationMs, endpoints, requests, category = 'stress', isCustomYaml, customYaml) => {
+    let test = await safeFindTest(testId);
+    const userId = test?.userId || null;
+    emitter_1.testEmitter.emit('test-started', { message: `Ejecutando ${toolsToRun.join(', ')} contra ${targetUrl}`, type: category, userId });
+    if (test) {
         test.status = 'running';
-        await test.save();
-        console.log(`Ejecutando pruebas paralelas ${toolsToRun.join(', ')} contra ${test.targetUrl} (ID: ${testId})`);
-        (0, monitor_1.startMonitoring)();
-        const configs = toolsToRun.map(tool => ({
-            tool,
-            targetUrl: test.targetUrl.startsWith('http') ? test.targetUrl : `http://backend:8080`,
-            concurrency: test.virtualUsers || 10,
-            durationMs: test.durationMs || 10000,
-            type: 'stress',
-            endpoints: [{ endpoint: test.targetUrl.startsWith('http') ? '/' : test.targetUrl, method: 'GET' }]
-        }));
-        await (0, tool_runner_1.runParallelTools)(configs, (metrics) => {
-            emitter_1.testEmitter.emit('test-update', { type: 'metrics', data: metrics });
+        await safeSave(test);
+    }
+    console.log(`Ejecutando pruebas paralelas ${toolsToRun.join(', ')} contra ${targetUrl} (ID: ${testId})`);
+    (0, monitor_1.startMonitoring)();
+    const configs = [];
+    for (const tool of toolsToRun) {
+        if (endpoints && endpoints.length > 0) {
+            for (const ep of endpoints) {
+                const epConfig = ep;
+                configs.push({
+                    testId,
+                    tool,
+                    targetUrl: (typeof ep.endpoint === 'string' && ep.endpoint.startsWith('http')) ? ep.endpoint : `http://${ep.endpoint || ''}`,
+                    concurrency: epConfig.concurrency > 0 ? epConfig.concurrency : concurrency,
+                    durationMs: epConfig.durationMs > 0 ? epConfig.durationMs : (epConfig.duration ? epConfig.duration * 1000 : durationMs),
+                    type: category,
+                    requests: epConfig.requests > 0 ? epConfig.requests : requests,
+                    rampUp: epConfig.rampUp || 0,
+                    endpoints: [ep],
+                    isCustomYaml,
+                    customYaml
+                });
+            }
+        }
+        else {
+            configs.push({
+                testId,
+                tool,
+                targetUrl: (typeof targetUrl === 'string' && targetUrl.startsWith('http')) ? targetUrl : `http://${targetUrl || ''}`,
+                concurrency: concurrency > 0 ? concurrency : 1,
+                durationMs: durationMs > 0 ? durationMs : 10000,
+                type: category,
+                requests: requests > 0 ? requests : 1,
+                endpoints: [{ endpoint: '/', method: 'GET' }],
+                isCustomYaml,
+                customYaml
+            });
+        }
+    }
+    let allLogs = '';
+    const finalMetricsMap = {};
+    let perEndpointResults = [];
+    try {
+        perEndpointResults = await (0, tool_runner_1.runParallelTools)(configs, (metrics) => {
+            emitter_1.testEmitter.emit('test-update', { type: 'metrics', data: metrics, testType: category, userId });
         }, (tool, log) => {
-            emitter_1.testEmitter.emit('test-update', { type: 'log', tool, log });
+            allLogs += `[${tool}] ${log}\n`;
+            console.log(`[BACKEND DEBUG] Emitiendo test-update (log) para ${tool}: ${log}`);
+            emitter_1.testEmitter.emit('test-update', { type: 'log', tool, log, testType: category, userId });
         }, (tool, finalMetrics) => {
-            emitter_1.testEmitter.emit('test-update', { type: 'complete', tool, metrics: finalMetrics });
+            if (finalMetrics) {
+                finalMetricsMap[tool] = finalMetrics;
+            }
+            emitter_1.testEmitter.emit('test-update', { type: 'complete', tool, metrics: finalMetrics, testType: category, userId });
         });
-        // ... (rest of logic for saving status)
-        // Note: The parallel runner doesn't have a completion callback yet in this simple refactor.
-        // I need to add one.
     }
     catch (err) {
-        // ...
+        console.error(`Error en runParallelTools:`, err);
     }
+    const monitorSample = (0, monitor_1.getLatestSample)();
+    const summary = {
+        totalRequests: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.totalRequests || 0), 0),
+        successful: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.successCount || 0), 0),
+        failed: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.failCount || 0), 0),
+        avgLatency: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.avg || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+        minLatency: Math.min(...Object.values(finalMetricsMap).map((m) => m.latency?.avg || Infinity)),
+        maxLatency: Math.max(...Object.values(finalMetricsMap).map((m) => m.latency?.avg || 0)),
+        p95: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.p95 || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+        p99: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.p99 || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+        throughput: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.throughput || 0), 0),
+        durationMs,
+        cpuUsage: monitorSample?.cpuUsage || 0,
+        ramUsage: monitorSample?.usedRamGB || 0,
+        concurrency: concurrency || 10,
+        percentiles: {
+            p50: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.p50 || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+            p95: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.p95 || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+            p99: Object.values(finalMetricsMap).reduce((sum, m) => sum + (m.latency?.p99 || 0), 0) / Math.max(1, Object.keys(finalMetricsMap).length),
+        }
+    };
+    if (test) {
+        test.status = 'completed';
+        test.summary = summary;
+        test.rawOutput = allLogs;
+        await safeSave(test);
+    }
+    const resolvedCategory = (category === 'security' ? 'SECURITY' : category === 'database' ? 'DATABASE' : category.toUpperCase() || 'API');
+    // Si hay resultados específicos por endpoint, guardamos cada uno
+    if (perEndpointResults && perEndpointResults.length > 0) {
+        for (const ep of perEndpointResults) {
+            try {
+                await TestResult_1.TestResult.create({
+                    toolName: toolsToRun[0] || 'api',
+                    category: resolvedCategory,
+                    endpoint: ep.url,
+                    method: ep.method || 'GET',
+                    logContent: allLogs,
+                    metrics: {
+                        rps: ep.totalRequests > 0 ? ep.totalRequests / Math.max(1, durationMs / 1000) : 0,
+                        latency: {
+                            avg: ep.avgLatency || 0,
+                            p50: ep.avgLatency * 0.8 || 0,
+                            p95: ep.p95 || 0,
+                            p99: ep.p99 || 0,
+                        },
+                        totalRequests: ep.totalRequests || 0,
+                        successCount: ep.successCount || 0,
+                        failCount: ep.failCount || 0,
+                        errorRate: ep.totalRequests > 0 ? (ep.failCount / ep.totalRequests) * 100 : 0,
+                    },
+                    userId: test?.userId || null,
+                    createdAt: new Date(),
+                });
+            }
+            catch { /* noop */ }
+        }
+    }
+    // Guardar también registro consolidado por herramienta si no hay endpoints o para métricas globales
+    if (Object.keys(finalMetricsMap).length > 0) {
+        for (const [tool, metrics] of Object.entries(finalMetricsMap)) {
+            try {
+                await TestResult_1.TestResult.create({
+                    toolName: tool,
+                    category: resolvedCategory,
+                    endpoint: targetUrl,
+                    method: 'GET',
+                    logContent: allLogs,
+                    metrics: {
+                        rps: metrics.throughput || 0,
+                        latency: {
+                            avg: metrics.latency?.avg || 0,
+                            p50: metrics.latency?.p50 || metrics.latency?.avg || 0,
+                            p95: metrics.latency?.p95 || 0,
+                            p99: metrics.latency?.p99 || 0,
+                        },
+                        totalRequests: metrics.totalRequests || 0,
+                        successCount: metrics.successCount || 0,
+                        failCount: metrics.failCount || 0,
+                        errorRate: metrics.errorRate || 0,
+                    },
+                    userId: test?.userId || null,
+                    createdAt: new Date(),
+                });
+            }
+            catch { /* noop */ }
+        }
+    }
+    else if (!perEndpointResults || perEndpointResults.length === 0) {
+        // Fallback con el summary global
+        try {
+            await TestResult_1.TestResult.create({
+                toolName: toolsToRun[0] || 'simulacion',
+                category: resolvedCategory,
+                endpoint: targetUrl,
+                method: 'GET',
+                logContent: allLogs,
+                metrics: {
+                    rps: summary.throughput || 0,
+                    latency: {
+                        avg: summary.avgLatency || 0,
+                        p50: summary.percentiles?.p50 || 0,
+                        p95: summary.p95 || 0,
+                        p99: summary.p99 || 0,
+                    },
+                    totalRequests: summary.totalRequests || 0,
+                    successCount: summary.successful || 0,
+                    failCount: summary.failed || 0,
+                    errorRate: summary.totalRequests > 0 ? (summary.failed / summary.totalRequests) * 100 : 0,
+                },
+                userId: test?.userId || null,
+                createdAt: new Date(),
+            });
+        }
+        catch { /* noop */ }
+    }
+    emitter_1.testEmitter.emit('test-suite-complete', {
+        testId,
+        summary,
+        finalMetrics: finalMetricsMap,
+        rawOutput: allLogs,
+        testType: category,
+        userId
+    });
+    // ... (antes de emitir test-data)
+    console.log(`[DEBUG_EMIT] Emitiendo test-data con ${perEndpointResults.length} resultados encontrados para ${endpoints?.length} endpoints configurados`);
+    const normalizeEndpoint = (value) => value
+        .trim()
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/$/, '')
+        .toLowerCase();
+    emitter_1.testEmitter.emit('test-data', {
+        type: 'complete',
+        summary,
+        metrics: finalMetricsMap,
+        testType: category,
+        userId,
+        endpoints: (endpoints || []).map((ep) => {
+            const endpointKey = normalizeEndpoint(ep.endpoint);
+            const match = perEndpointResults.find(r => normalizeEndpoint(r.url) === endpointKey && r.method === (ep.method || 'GET'));
+            if (match) {
+                console.log(`[DEBUG_MATCH] Match encontrado para ${ep.endpoint}:`, match);
+                return {
+                    url: ep.endpoint,
+                    method: ep.method || 'GET',
+                    latency: match.avgLatency || 0,
+                    status: (match.status === 'error' ? 'error' : 'success'),
+                    avgLatency: match.avgLatency || 0,
+                    successRate: match.totalRequests > 0 ? Math.round((match.successCount / match.totalRequests) * 100) : 100,
+                    totalRequests: match.totalRequests,
+                    successful: match.successCount,
+                    failed: match.failCount,
+                    p50: match.avgLatency * 0.8 || 0,
+                    p95: match.p95 || 0,
+                    p99: match.p99 || 0,
+                    throughput: summary.throughput / Math.max(1, endpoints?.length || 1),
+                    rawOutput: allLogs,
+                    percentiles: { p50: match.avgLatency * 0.8 || 0, p95: match.p95 || 0, p99: match.p99 || 0 },
+                };
+            }
+            console.log(`[DEBUG_MATCH] NO Match para ${ep.endpoint}, usando valores por defecto`);
+            return {
+                url: ep.endpoint,
+                method: ep.method || 'GET',
+                latency: 0,
+                status: 'error',
+                avgLatency: 0,
+                successRate: 0,
+                totalRequests: 0,
+                successful: 0,
+                failed: 0,
+                p50: 0,
+                p95: 0,
+                p99: 0,
+                throughput: 0,
+                rawOutput: allLogs,
+                percentiles: { p50: 0, p95: 0, p99: 0 },
+            };
+        }),
+    });
+    console.log(`Pruebas completadas para ${testId}`);
 };
 exports.runStressTest = runStressTest;
 //# sourceMappingURL=executor.js.map

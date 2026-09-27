@@ -13,12 +13,14 @@ type LoadingContextType = {
 const LoadingContext = createContext<LoadingContextType | undefined>(undefined);
 
 export const LoadingProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const pathname = usePathname();
 
-  // Desactivar carga automáticamente cuando la ruta cambia
+  // Mostrar el loader al montar la app y durante cada cambio de ruta.
   useEffect(() => {
-    setIsLoading(false);
+    setIsLoading(true);
+    const timer = window.setTimeout(() => setIsLoading(false), 700);
+    return () => window.clearTimeout(timer);
   }, [pathname]);
 
   const startLoading = () => setIsLoading(true);

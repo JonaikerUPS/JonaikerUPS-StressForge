@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Play, Settings, Clock, Users, Zap, Globe, Pencil, Trash2, ZoomIn, ZoomOut, Check } from "lucide-react";
 import { motion } from "framer-motion";
 
-export const TestControlPanel = ({ customConfig }: { customConfig?: any }) => {
+export const TestControlPanel = ({ customConfig, onStart }: { customConfig?: any; onStart?: (config: any) => void }) => {
   const [isCustomYaml, setIsCustomYaml] = useState(false);
   const [customYaml, setCustomYaml] = useState("");
   const [isEditingYaml, setIsEditingYaml] = useState(false);
@@ -20,6 +20,16 @@ export const TestControlPanel = ({ customConfig }: { customConfig?: any }) => {
 
   const runTest = () => {
     setLoading(true);
+    if (onStart) {
+      onStart({
+        targetUrl: config.targetUrl,
+        concurrency: customConfig?.concurrency || config.concurrency,
+        durationMs: customConfig?.durationMs || config.durationMs,
+        rampUp: customConfig?.rampUp || config.rampUp,
+        isCustomYaml: isCustomYaml && Boolean(customYaml.trim()),
+        customYaml: isCustomYaml ? customYaml : undefined,
+      });
+    }
     setTimeout(() => setLoading(false), 1000);
   };
 

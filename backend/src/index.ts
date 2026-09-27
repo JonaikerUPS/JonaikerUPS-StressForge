@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { exec } from 'child_process';
 import testRoutes from './routes/testRoutes';
 import authRoutes from './routes/authRoutes';
 import { createServer } from 'http';
@@ -13,10 +14,17 @@ import { activeProcesses } from './services/tool-runner';
 import { TestRun } from './models/TestRun';
 import { TestResult } from './models/TestResult';
 import { trackRequest } from './services/sessionService';
+import crypto from 'crypto';
 
 dotenv.config();
 
 startMonitoring();
+
+// Warm up Taurus tool to prevent first-run cold start initialization errors
+exec('bzt --version', { timeout: 5000 }, (err) => {
+    if (err) console.debug('Taurus warm-up skipped or not installed locally');
+    else console.log('Taurus engine warmed up successfully.');
+});
 
 const app = express();
 
@@ -25,6 +33,31 @@ const io = new Server(httpServer, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
+    }
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
+
+io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('No autenticado'));
+
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) throw new Error('Token invalido');
+        const signature = crypto.createHmac('sha256', JWT_SECRET)
+            .update(`${parts[0]}.${parts[1]}`)
+            .digest('base64url');
+        if (signature !== parts[2]) throw new Error('Token invalido');
+
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+        if (!payload.userId || (payload.exp && payload.exp < Math.floor(Date.now() / 1000))) {
+            throw new Error('Token expirado o sin usuario');
+        }
+        socket.data.userId = payload.userId;
+        next();
+    } catch {
+        next(new Error('No autenticado'));
     }
 });
 
@@ -42,8 +75,8 @@ app.use(async (req, res, next) => {
     next();
 });
 
-app.get('/', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Backend is running' });
+app.all('/', (req, res) => {
+    res.status(200).json({ status: 'ok', method: req.method, message: 'Backend is running', receivedBody: req.body });
 });
 
 app.use((req, res, next) => {
@@ -64,23 +97,33 @@ app.use('/api', (req, res, next) => {
 app.use('/api/auth', authRoutes);
 
 testEmitter.on('test-update', (data) => {
-    io.emit('test-update', data);
+    emitToUser('test-update', data);
 });
 
 testEmitter.on('test-started', (data) => {
-    io.emit('test-started', data);
+    emitToUser('test-started', data);
 });
 
 testEmitter.on('test-suite-complete', (data) => {
-    io.emit('test-suite-complete', data);
+    emitToUser('test-suite-complete', data);
 });
 
 testEmitter.on('test-data', (data) => {
-    io.emit('test-data', data);
+    emitToUser('test-data', data);
 });
+
+function emitToUser(event: string, data: any) {
+    if (!data?.userId) return;
+    for (const client of io.sockets.sockets.values()) {
+        if (client.data.userId === data.userId) {
+            client.emit(event, data);
+        }
+    }
+}
 
 io.on('connection', (socket) => {
     console.log(`Cliente conectado: ${socket.id}`);
+    socket.data.testIds = new Set<string>();
 
     // LOG DE TODO LO QUE LLEGA AL SOCKET
     socket.onAny((event, ...args) => {
@@ -96,22 +139,16 @@ io.on('connection', (socket) => {
         console.log(`[BACKEND DEBUG] Evento 'start-test' recibido con datos:`, JSON.stringify(data));
         
         // Extraer userId de data.userId o token JWT
-        let userId = data.userId || null;
-        const token = data.token || socket.handshake.auth?.token;
-        if (!userId && token) {
-            try {
-                const parts = token.split('.');
-                if (parts.length === 3) {
-                    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
-                    userId = payload.userId;
-                }
-            } catch {}
+        let userId = socket.data.userId || null;
+        if (!userId) {
+            socket.emit('test-status', { type: 'error', message: 'Usuario no autenticado' });
+            return;
         }
 
         // Manejo especializado de pruebas de Base de Datos
         if ((data.queries && data.queries.length > 0) || data.category === 'database') {
             socket.emit('test-started', { message: `Iniciando prueba de Base de Datos (${data.provider || 'mongo'})`, type: 'database' });
-            testEmitter.emit('test-update', { type: 'log', tool: data.tool || 'database', log: `Iniciando benchmark con ${data.queries?.length || 0} consultas`, testType: 'database' });
+            testEmitter.emit('test-update', { type: 'log', tool: data.tool || 'database', log: `Iniciando benchmark con ${data.queries?.length || 0} consultas`, testType: 'database', userId });
 
             const queryResults: any[] = [];
 
@@ -144,7 +181,7 @@ io.on('connection', (socket) => {
                     status
                 };
                 queryResults.push(qRes);
-                testEmitter.emit('test-update', { type: 'log', tool: data.tool || 'database', log: `[${status.toUpperCase()}] ${q} - ${duration}ms (${rows} filas)`, testType: 'database' });
+                testEmitter.emit('test-update', { type: 'log', tool: data.tool || 'database', log: `[${status.toUpperCase()}] ${q} - ${duration}ms (${rows} filas)`, testType: 'database', userId });
             }
 
             const avgDuration = queryResults.length ? Math.round(queryResults.reduce((a, b) => a + b.duration, 0) / queryResults.length) : 0;
@@ -184,11 +221,13 @@ io.on('connection', (socket) => {
                 type: 'complete',
                 testType: 'database',
                 results: queryResults,
-                summary: dbSummary
+                summary: dbSummary,
+                userId
             });
             testEmitter.emit('test-suite-complete', {
                 testType: 'database',
-                summary: dbSummary
+                summary: dbSummary,
+                userId
             });
             return;
         }
@@ -232,7 +271,10 @@ io.on('connection', (socket) => {
             ).catch(err => {
                 console.error('Error en test:', err);
                 socket.emit('test-status', { type: 'error', message: err.message });
+            }).finally(() => {
+                socket.data.testIds.delete(newTest._id.toString());
             });
+            socket.data.testIds.add(newTest._id.toString());
         } catch (err: any) {
             console.error('Error creando TestRun:', err);
             socket.emit('test-status', { type: 'error', message: err.message });
@@ -241,10 +283,12 @@ io.on('connection', (socket) => {
 
     socket.on('cancel-test', () => {
         console.log(`Cancelación solicitada por ${socket.id}`);
-        for (const processes of activeProcesses.values()) {
+        for (const testId of socket.data.testIds as Set<string>) {
+            const processes = activeProcesses.get(testId) || [];
             processes.forEach(p => p.kill());
+            activeProcesses.delete(testId);
         }
-        activeProcesses.clear();
+        socket.data.testIds.clear();
         socket.emit('test-status', { type: 'cancelled', message: 'Prueba cancelada' });
     });
 

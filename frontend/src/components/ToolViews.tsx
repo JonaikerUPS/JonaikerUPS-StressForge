@@ -6,6 +6,8 @@ import { Activity, AlertTriangle, Cpu, Zap, Download } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { ApexOptions } from "apexcharts";
 import { generateReportPdf } from "../lib/pdf-generator";
+import { TestControlPanel } from "./TestControlPanel";
+import { AIDiagnosticReport } from "@/components/dashboard/AIDiagnosticReport";
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false }) as any;
 
@@ -178,6 +180,18 @@ const BaseView = ({ title, description, colorClass, isUp, running, metrics, endp
 
       {/* Charts grid */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>
+
+      {metrics && (
+        <AIDiagnosticReport summary={{
+          totalRequests: metrics.totalRequests || 0,
+          successful: Math.round((metrics.totalRequests || 0) * (1 - (metrics.errorRate || 0)/100)),
+          failed: Math.round((metrics.totalRequests || 0) * ((metrics.errorRate || 0)/100)),
+          avgLatency: metrics.latency?.avg || 0,
+          p95: metrics.latency?.p95 || 0,
+          p99: metrics.latency?.p99 || 0,
+          throughput: metrics.throughput || 0,
+        }} />
+      )}
     </div>
   );
 };
@@ -209,8 +223,13 @@ export const ArtilleryView = ({ metrics, ...props }: ToolViewProps) => (
 
 export const TaurusView = ({ metrics, ...props }: ToolViewProps) => (
   <BaseView title="Taurus" description="Unified YAML — multi-backend" colorClass="cyan" metrics={metrics} {...props} onStart={() => props.onStartTest({})}>
-    <MetricChart title="Throughput" unit="req/s" color="#06b6d4" seriesName="rps" data={metrics ? [metrics.throughput] : []} metrics={metrics} />
-    <MetricChart title="CPU Usage"  unit="%"     color="#22d3ee" seriesName="%"   data={metrics ? [metrics.cpuUsage]   : []} metrics={metrics} />
+    <div className="mb-6">
+      <TestControlPanel onStart={(cfg) => props.onStartTest(cfg)} />
+    </div>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <MetricChart title="Throughput" unit="req/s" color="#06b6d4" seriesName="rps" data={metrics ? [metrics.throughput] : []} metrics={metrics} />
+      <MetricChart title="CPU Usage"  unit="%"     color="#22d3ee" seriesName="%"   data={metrics ? [metrics.cpuUsage]   : []} metrics={metrics} />
+    </div>
   </BaseView>
 );
 

@@ -13,7 +13,6 @@ import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import ModuleCard from "@/components/dashboard/ModuleCard";
 import { DynamicToolConfig } from "@/components/dashboard/DynamicToolConfig";
 import { DashboardProvider, useDashboard } from "@/lib/dashboard-context";
-import { useLoading } from "@/lib/loading-context";
 import { FeedbackModal } from "@/components/FeedbackModal";
 import { WelcomeModal } from "@/components/WelcomeModal";
 import type { ApexOptions } from "apexcharts";
@@ -24,6 +23,7 @@ import {
 } from "lucide-react";
 import { useUnifiedTest } from "@/lib/unified-test-context";
 import { useTestResults } from "@/lib/test-results-context";
+import { useAuth } from "@/lib/auth-context";
 import { translateLog } from "@/lib/log-translator";
 import { type ToolOption } from "@/lib/tool-schemas";
 import { checkToolStatus, apiClient } from "@/lib/api-client";
@@ -61,42 +61,61 @@ export default function DashboardPage() {
 
 function DashboardContent() {
   const { health } = useDashboard();
-  const { stopLoading, startLoading } = useLoading();
+  const { user } = useAuth();
 
-  useEffect(() => {
-    startLoading();
-    const t = setTimeout(() => stopLoading(), 1000);
-    return () => clearTimeout(t);
-  }, []);
+  const safeMetricNumber = (value: number | undefined | null, fallback = 0) => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
 
   const { selectedTool, config, updateConfig, intervalMs, endpoints } = useUnifiedTest();
   const { results, publishApiResults, publishWsResults, publishDbResults, publishLoadResults, clearResults } = useTestResults();
-  
+  const userKey = user?.userId || "guest";
+  const visitedKey = `visited-dashboard-${userKey}`;
+  const dismissedKey = `welcome-dismissed-${userKey}`;
+
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
   const [modalConfig, setModalConfig] = useState<{title: string, message: string} | null>(null);
+  const [isHydratingDashboard, setIsHydratingDashboard] = useState(true);
+
+  const hasAnyStoredResults = !!(
+    results.cache ||
+    results.security ||
+    results.files
+  );
 
   useEffect(() => {
-      const dismissed = typeof window !== "undefined" ? sessionStorage.getItem("welcome-dismissed") : null;
+      const timer = window.setTimeout(() => setIsHydratingDashboard(false), 500);
+      return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+      if (typeof window === "undefined") return;
+
+      const dismissed = sessionStorage.getItem(dismissedKey);
       if (dismissed) return;
 
-      const hasVisited = localStorage.getItem("visited-dashboard");
-      const hasActivity = results && (results.api || results.websocket || results.database || results.load || results.network || results.security || results.files);
+      const hasVisited = localStorage.getItem(visitedKey);
+      const hasActivity = hasAnyStoredResults;
 
-      if (!hasVisited) {
+      if (!hasVisited && !hasActivity) {
           setIsWelcomeModalOpen(true);
           setModalConfig({
               title: "Bienvenido a StressForge",
               message: "¡Hola! Esta es tu primera vez en el sistema. Estamos listos para comenzar tus pruebas de rendimiento."
           });
-          localStorage.setItem("visited-dashboard", "true");
-      } else if (hasActivity) {
+          localStorage.setItem(visitedKey, "true");
+          return;
+      }
+
+      if ((hasVisited || hasActivity) && !dismissed) {
           setIsWelcomeModalOpen(true);
           setModalConfig({
               title: "Bienvenido de nuevo",
               message: "Hemos detectado actividad previa en tu cuenta. ¿Cómo deseas proceder?"
           });
       }
-  }, [results]);
+  }, [dismissedKey, hasAnyStoredResults, userKey, visitedKey]);
   
   const [logs, setLogs] = useState<{tool: string, message: string, time: string}[]>([]);
   const [unifiedMetrics, setUnifiedMetrics] = useState<UnifiedMetrics | null>(null);
@@ -117,13 +136,13 @@ function DashboardContent() {
         tool: "histórico",
         timestamp: Date.now(),
         latency: { 
-            avg: results.api.avgLatency, 
-            p50: results.api.percentiles?.p50,
-            p95: results.api.percentiles?.p95 || 0,
-            p99: results.api.percentiles?.p99
+            avg: safeMetricNumber(results.api.avgLatency, 0), 
+            p50: safeMetricNumber(results.api.percentiles?.p50, 0),
+            p95: safeMetricNumber(results.api.percentiles?.p95, 0),
+            p99: safeMetricNumber(results.api.percentiles?.p99, 0)
         },
-        throughput: results.api.throughput,
-        errorRate: 100 - results.api.successRate,
+        throughput: safeMetricNumber(results.api.throughput, 0),
+        errorRate: 100 - safeMetricNumber(results.api.successRate, 0),
         cpuUsage: 0,
         ramUsage: 0
       });
@@ -133,7 +152,23 @@ function DashboardContent() {
   const socket = useSocket();
 
   useEffect(() => {
-  }, [results]);
+    if (!socket) {
+      setStatusMessage("Conectando...");
+      return;
+    }
+
+    const onConnect = () => setStatusMessage("Sistema operativo y conectado");
+    const onDisconnect = () => setStatusMessage("Reconectando...");
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    setStatusMessage(socket.connected ? "Sistema operativo y conectado" : "Reconectando...");
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+    };
+  }, [socket]);
 
   const [systemResources, setSystemResources] = useState({ cpu: 0, ram: 0 });
   useEffect(() => {
@@ -372,18 +407,20 @@ function DashboardContent() {
   ], [results]);
 
   const completedCount = modules.filter((m) => m.completed).length;
+  const showDashboardSkeleton = isHydratingDashboard && !hasAnyStoredResults;
+  const skeletonCards = Array.from({ length: 6 }, (_, index) => index);
 
   return (
     <div ref={dashboardRef} className={`min-h-screen mx-auto space-y-6 py-2 theme-${health} transition-colors duration-500`} suppressHydrationWarning>
       <WelcomeModal 
         isOpen={isWelcomeModalOpen} 
         onContinue={() => {
-          if (typeof window !== "undefined") sessionStorage.setItem("welcome-dismissed", "true");
+          if (typeof window !== "undefined") sessionStorage.setItem(dismissedKey, "true");
           setIsWelcomeModalOpen(false);
         }}
         onNewTest={() => {
-          if (typeof window !== "undefined") sessionStorage.setItem("welcome-dismissed", "true");
-          clearResults();
+          if (typeof window !== "undefined") sessionStorage.setItem(dismissedKey, "true");
+          clearResults(undefined, { hard: true });
           setIsWelcomeModalOpen(false);
         }}
         {...modalConfig}
@@ -399,14 +436,26 @@ function DashboardContent() {
       />
 
       {/* ── KPI Cards ───────────────────────────────────────────────── */}
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
-        <MetricCard label="Latencia API Prom." value={results.api?.avgLatency != null ? `${results.api.avgLatency.toFixed(2)}ms` : "0.00ms"} icon={Server}      color={COLORS.primary} desc="Tiempo de respuesta promedio" />
-        <MetricCard label="Throughput WS"      value={results.websocket ? `${results.websocket.messagesSent + results.websocket.messagesReceived} msg` : "0 msg/s"} icon={Radio} color={COLORS.success} desc="Total mensajes / tasa" />
-        <MetricCard label="Tiempo DB Prom."    value={results.database?.avgDuration != null ? `${results.database.avgDuration}ms` : "0.00ms"} icon={Database}    color={COLORS.warning} desc="Duración promedio consultas" />
-        <MetricCard label="Tasa de Éxito"      value={results.api ? `${results.api.successRate}%` : "0%"}                icon={ShieldCheck} color={COLORS.purple}  desc="Solicitudes exitosas" />
-        <MetricCard label="CPU / Memoria"      value={`${metrics.cpuAvg}% / ${metrics.memAvg}%`}                        icon={Activity}    color={COLORS.pink}    desc="Uso real del sistema" />
-        <MetricCard label="Módulos Completos"  value={`${completedCount} / ${modules.length}`}                          icon={Zap}         color={COLORS.danger}  desc="Tests ejecutados" />
-      </section>
+      {showDashboardSkeleton ? (
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
+          {skeletonCards.map((index) => (
+            <div key={index} className="rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm animate-pulse dark:border-slate-800/80 dark:bg-slate-900/50">
+              <div className="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700 mb-4" />
+              <div className="h-10 w-20 rounded bg-slate-200 dark:bg-slate-700 mb-2" />
+              <div className="h-3 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+            </div>
+          ))}
+        </section>
+      ) : (
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-6">
+          <MetricCard label="Latencia API Prom." value={results.api?.avgLatency != null ? `${results.api.avgLatency.toFixed(2)}ms` : "0.00ms"} icon={Server}      color={COLORS.primary} desc="Tiempo de respuesta promedio" />
+          <MetricCard label="Throughput WS"      value={results.websocket ? `${results.websocket.messagesSent + results.websocket.messagesReceived} msg` : "0 msg/s"} icon={Radio} color={COLORS.success} desc="Total mensajes / tasa" />
+          <MetricCard label="Tiempo DB Prom."    value={results.database?.avgDuration != null ? `${results.database.avgDuration}ms` : "0.00ms"} icon={Database}    color={COLORS.warning} desc="Duración promedio consultas" />
+          <MetricCard label="Tasa de Éxito"      value={results.api ? `${results.api.successRate}%` : "0%"}                icon={ShieldCheck} color={COLORS.purple}  desc="Solicitudes exitosas" />
+          <MetricCard label="CPU / Memoria"      value={`${metrics.cpuAvg}% / ${metrics.memAvg}%`}                        icon={Activity}    color={COLORS.pink}    desc="Uso real del sistema" />
+          <MetricCard label="Módulos Completos"  value={`${completedCount} / ${modules.length}`}                          icon={Zap}         color={COLORS.danger}  desc="Tests ejecutados" />
+        </section>
+      )}
 
       {/* ── Module Grid ─────────────────────────────────────────────── */}
       <section className="space-y-3">
@@ -424,7 +473,7 @@ function DashboardContent() {
           </div>
           {completedCount > 0 && (
             <button
-              onClick={() => clearResults()}
+              onClick={() => clearResults(undefined, { hard: true })}
               className="self-start sm:self-auto rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-100 dark:border-rose-500/10 dark:bg-rose-500/5 dark:text-rose-400 dark:hover:bg-rose-500/15"
             >
               Limpiar historial
@@ -432,11 +481,32 @@ function DashboardContent() {
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {modules.map((m) => (
-            <ModuleCard key={m.href} {...m} />
-          ))}
-        </div>
+        {showDashboardSkeleton ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {skeletonCards.map((index) => (
+              <div key={index} className="rounded-2xl border border-slate-200/60 bg-white/80 p-5 shadow-sm animate-pulse dark:border-slate-800/80 dark:bg-slate-900/50">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-slate-200 dark:bg-slate-700" />
+                  <div className="space-y-2">
+                    <div className="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-20 rounded bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                </div>
+                <div className="mt-6 space-y-2">
+                  <div className="h-3 w-full rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="h-3 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+                </div>
+                <div className="mt-6 h-10 w-full rounded-xl bg-slate-200 dark:bg-slate-700" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {modules.map((m) => (
+              <ModuleCard key={m.href} {...m} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ── Live tool analysis ──────────────────────────────────────── */}
@@ -477,10 +547,10 @@ function DashboardContent() {
           {unifiedMetrics ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {[
-                { label: "Latencia p50", value: `${unifiedMetrics.latency.p50 || "—"} ms`, color: "text-emerald-500" },
-                { label: "Latencia p95", value: `${unifiedMetrics.latency.p95} ms`,         color: "text-amber-500"  },
-                { label: "Latencia p99", value: `${unifiedMetrics.latency.p99 || "—"} ms`, color: "text-rose-500"   },
-                { label: "Throughput",   value: `${unifiedMetrics.throughput} req/s`,        color: "text-sky-500"   },
+                { label: "Latencia p50", value: `${safeMetricNumber(unifiedMetrics.latency.p50, 0)} ms`, color: "text-emerald-500" },
+                { label: "Latencia p95", value: `${safeMetricNumber(unifiedMetrics.latency.p95, 0)} ms`, color: "text-amber-500" },
+                { label: "Latencia p99", value: `${safeMetricNumber(unifiedMetrics.latency.p99, 0)} ms`, color: "text-rose-500" },
+                { label: "Throughput", value: `${safeMetricNumber(unifiedMetrics.throughput, 0)} req/s`, color: "text-sky-500" },
               ].map((stat) => (
                 <div key={stat.label} className="rounded-xl bg-slate-50 dark:bg-white/4 border border-slate-100 dark:border-white/5 p-3">
                   <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">{stat.label}</p>
@@ -580,26 +650,11 @@ function DashboardContent() {
                 height={220}
               />
             ) : (
-              // Donut placeholder when no real data
-              <div className="flex flex-col items-center justify-center gap-4 py-4">
-                <Chart
-                  key="donut-empty"
-                  width="100%"
-                  options={{
-                    ...baseChart,
-                    chart: { ...baseChart.chart, type: "donut", background: "transparent" },
-                    colors: ["#e2e8f0", "#cbd5e1", "#94a3b8", "#64748b"],
-                    labels: ["< 100ms", "100-300ms", "300-500ms", "> 500ms"],
-                    dataLabels: { enabled: false },
-                    legend: { position: "bottom", labels: { colors: ["#94a3b8"] } },
-                    stroke: { show: false },
-                    plotOptions: { pie: { donut: { size: "65%", labels: { show: true, total: { show: true, label: "Sin datos", fontSize: "12px", color: "#94a3b8", formatter: () => "Ejecuta API" } } } } },
-                    tooltip: { enabled: false },
-                  } as ApexOptions}
-                  series={[35, 40, 18, 7]}
-                  type="donut"
-                  height={200}
-                />
+              <div className="flex h-60 flex-col items-center justify-center gap-4 py-4">
+                <div className="relative h-32 w-32 rounded-full border-[14px] border-slate-200 dark:border-slate-800">
+                  <div className="absolute inset-[-14px] rounded-full border-[14px] border-transparent border-t-slate-300 dark:border-t-slate-700" />
+                  <div className="absolute inset-0 flex items-center justify-center text-2xl font-bold text-slate-400">--</div>
+                </div>
                 <p className="text-xs text-slate-400 dark:text-slate-600">Ejecuta pruebas de API para ver datos reales</p>
               </div>
             )

@@ -22,6 +22,7 @@ export interface ITestRun {
     };
     rawOutput?: string;
     createdAt: Date;
+    userId?: string;
 }
 export declare const TestRun: import("mongoose").Model<ITestRun, {}, {}, {}, import("mongoose").Document<unknown, {}, ITestRun, {}, import("mongoose").DefaultSchemaOptions> & ITestRun & {
     _id: import("mongoose").Types.ObjectId;

@@ -3,6 +3,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { type ToolOption } from "@/lib/tool-schemas";
 import { type HttpMethod, type EndpointConfig, type StoredTestRun } from "@/lib/api-test-config-context";
+import { useAuth } from "./auth-context";
+import { getBackendUrl } from "@/lib/api-url";
 
 interface UnifiedTestContextType {
   // Test Config
@@ -36,17 +38,21 @@ const TOOL_KEY = "test-tool";
 const ENDPOINTS_KEY = "unified-test-endpoints";
 const LAST_RUNS_KEY = "api-test-last-runs";
 
-function loadLastRuns(): Record<ToolOption, StoredTestRun | null> {
+function scopedKey(key: string, userId: string | null | undefined) {
+  return `${key}:${userId || "guest"}`;
+}
+
+function loadLastRuns(key: string): Record<ToolOption, StoredTestRun | null> {
     try {
-      const stored = localStorage.getItem(LAST_RUNS_KEY);
+      const stored = localStorage.getItem(key);
       if (stored) return JSON.parse(stored);
     } catch { /* noop */ }
     return {} as any;
 }
 
-function loadInterval(): number {
+function loadInterval(key: string): number {
   try {
-    const stored = localStorage.getItem(INTERVAL_KEY);
+    const stored = localStorage.getItem(key);
     if (stored) {
       const parsed = Number(stored);
       if (!isNaN(parsed) && parsed >= 100) return parsed;
@@ -55,28 +61,39 @@ function loadInterval(): number {
   return 2000;
 }
 
-function loadTool(): string {
-  try { return localStorage.getItem(TOOL_KEY) || "k6"; } catch { return "k6"; }
+function loadTool(key: string): string {
+  try { return localStorage.getItem(key) || "k6"; } catch { return "k6"; }
 }
 
-function loadEndpoints(): EndpointConfig[] {
+function loadEndpoints(key: string): EndpointConfig[] {
     try {
-      const stored = localStorage.getItem(ENDPOINTS_KEY);
+      const stored = localStorage.getItem(key);
       if (stored) return JSON.parse(stored) as EndpointConfig[];
     } catch { /* noop */ }
     return [];
 }
 
 export function UnifiedTestProvider({ children }: { children: ReactNode }) {
-  const [intervalMs, setIntervalMs] = useState<number>(() => loadInterval());
-  const [selectedTool, setSelectedTool] = useState<ToolOption>(() => loadTool() as ToolOption);
+  const { user } = useAuth();
+  const storageSuffix = user?.userId || "guest";
+  const [intervalMs, setIntervalMs] = useState<number>(2000);
+  const [selectedTool, setSelectedTool] = useState<ToolOption>("k6");
+  const [storageReady, setStorageReady] = useState(false);
   
   // API Test State
-  const [endpoints, setEndpoints] = useState<EndpointConfig[]>(() => loadEndpoints());
-  const [lastRuns, setLastRuns] = useState<Record<ToolOption, StoredTestRun | null>>(() => loadLastRuns());
+  const [endpoints, setEndpoints] = useState<EndpointConfig[]>([]);
+  const [lastRuns, setLastRuns] = useState<Record<ToolOption, StoredTestRun | null>>({} as Record<ToolOption, StoredTestRun | null>);
   const [requestCount, setRequestCount] = useState(1);
   const [concurrentUsers, setConcurrentUsers] = useState(1);
   const [config, setConfig] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    setIntervalMs(loadInterval(scopedKey(INTERVAL_KEY, storageSuffix)));
+    setSelectedTool(loadTool(scopedKey(TOOL_KEY, storageSuffix)) as ToolOption);
+    setEndpoints(loadEndpoints(scopedKey(ENDPOINTS_KEY, storageSuffix)));
+    setLastRuns(loadLastRuns(scopedKey(LAST_RUNS_KEY, storageSuffix)));
+    setStorageReady(true);
+  }, [storageSuffix]);
 
 
   const updateConfig = (key: string, value: any) => {
@@ -85,12 +102,12 @@ export function UnifiedTestProvider({ children }: { children: ReactNode }) {
 
   const setAndPersistInterval = (ms: number) => {
     setIntervalMs(ms);
-    try { localStorage.setItem(INTERVAL_KEY, String(ms)); } catch { /* noop */ }
+    try { localStorage.setItem(scopedKey(INTERVAL_KEY, storageSuffix), String(ms)); } catch { /* noop */ }
   };
 
   const setAndPersistTool = (tool: ToolOption) => {
     setSelectedTool(tool);
-    try { localStorage.setItem(TOOL_KEY, tool); } catch { /* noop */ }
+    try { localStorage.setItem(scopedKey(TOOL_KEY, storageSuffix), tool); } catch { /* noop */ }
   };
 
   const setLastRun = (tool: ToolOption, run: StoredTestRun | null) => {
@@ -104,9 +121,10 @@ export function UnifiedTestProvider({ children }: { children: ReactNode }) {
 
   // Persistence for API endpoints and lastRuns
   useEffect(() => {
-    try { localStorage.setItem(ENDPOINTS_KEY, JSON.stringify(endpoints)); } catch { /* noop */ }
-    try { localStorage.setItem(LAST_RUNS_KEY, JSON.stringify(lastRuns)); } catch { /* noop */ }
-  }, [endpoints, lastRuns]);
+    if (!storageReady) return;
+    try { localStorage.setItem(scopedKey(ENDPOINTS_KEY, storageSuffix), JSON.stringify(endpoints)); } catch { /* noop */ }
+    try { localStorage.setItem(scopedKey(LAST_RUNS_KEY, storageSuffix), JSON.stringify(lastRuns)); } catch { /* noop */ }
+  }, [endpoints, lastRuns, storageReady, storageSuffix]);
 
   const addEndpoint = useCallback((endpoint: string, method: HttpMethod, requestBody?: string, config?: { concurrency?: number, requests?: number, duration?: number, rampUp?: number, headers?: Record<string, string> }) => {
     const trimmed = endpoint.trim();
@@ -132,7 +150,7 @@ export function UnifiedTestProvider({ children }: { children: ReactNode }) {
     setEndpoints([]);
   }, []);
 
-  const backendUrl = "http://localhost:4000";
+  const backendUrl = getBackendUrl();
 
   return (
     <UnifiedTestContext.Provider value={{ 

@@ -6,8 +6,8 @@ import { useUnifiedTest } from "@/lib/unified-test-context";
 import { useTestResults } from "@/lib/test-results-context";
 import { type HttpMethod, type EndpointConfig } from "@/lib/api-test-config-context";
 import {
-  Server, Play, Pencil, Trash2, Plus, X, FileText, Download,
-  BarChart3, Terminal, ClipboardList, AlertTriangle, HeartPulse, Key, Code, Activity, ShieldCheck, ChevronDown, ChevronUp, Eye, ZoomIn, ZoomOut, Globe
+  Server, Play, Pencil, Trash2, Plus, X, FileText, Download, Upload,
+  BarChart3, Terminal, ClipboardList, AlertTriangle, HeartPulse, Key, Code, Activity, ShieldCheck, ChevronDown, ChevronUp, Eye, ZoomIn, ZoomOut, Globe, Gauge
 } from "lucide-react";
 import { translateLog } from "@/lib/log-translator";
 import { parseLog } from "@/lib/metrics-adapter";
@@ -17,6 +17,8 @@ import { TOOL_SCHEMAS } from "@/lib/tool-schemas";
 import { useSocket } from "@/lib/socket-context";
 import { checkToolStatus } from "@/lib/api-client";
 import { GeneralSummaryReport, generatePDF, generateEndpointPDF } from "@/components/dashboard/GeneralSummaryReport";
+import { GlobalErrorModal } from "@/components/GlobalErrorModal";
+import { AIDiagnosticReport } from "@/components/dashboard/AIDiagnosticReport";
 
 type EndpointStatus = "idle" | "running" | "success" | "error";
 
@@ -123,7 +125,7 @@ export default function ApiTestsPage() {
 
   const removeEndpoint = (id: number) => {
     contextRemoveEndpoint(id);
-    clearResults();
+    clearResults('api');
   };
 
   const [isConnected, setIsConnected] = useState(false);
@@ -176,6 +178,11 @@ export default function ApiTestsPage() {
             data.log.includes("Post-processing...") ||
             data.log.includes("Test cancelled")) {
           clearUI();
+        }
+
+        if (data.log.includes("Internal Server Error") || data.log.includes("502 Bad Gateway") || data.log.includes("100.00% failures")) {
+          setErrorMessage(`Alerta de saturación en prueba de carga: El servidor remoto devolvió un error (${data.log.trim()}). Reduce la concurrencia o evita saturar el servidor.`);
+          setShowErrorModal(true);
         }
 
         setActiveLogs('api', (prev: string) => prev + `[${data.tool}] ${data.log}\n`);
@@ -235,15 +242,52 @@ export default function ApiTestsPage() {
             });
             // Publicar resultados de API en el contexto global de test results
             try {
-              const published = data.endpoints.map((ep: any) => ({
-                url: ep.url,
-                method: ep.method || 'GET',
-                latency: ep.avgLatency || ep.latency || 0,
-                status: (ep.status === "error" || (ep.failed && ep.failed > 0 && !ep.successful)) ? ("error" as const) : ("success" as const),
-                throughput: ep.throughput || data.summary?.throughput || 0,
-                errorRate: ep.errorRate || (ep.failed && (ep.successful + ep.failed) > 0 ? (ep.failed / (ep.successful + ep.failed)) * 100 : 0)
-              }));
-              publishApiResults(published);
+              const totalRequests = data.endpoints.reduce(
+                (sum: number, ep: any) => sum + (Number(ep.totalRequests) || 0),
+                0
+              );
+              const successfulRequests = data.endpoints.reduce(
+                (sum: number, ep: any) => sum + (Number(ep.successful ?? ep.successCount) || 0),
+                0
+              );
+              const avgLatency = data.endpoints.length > 0
+                ? data.endpoints.reduce(
+                    (sum: number, ep: any) => sum + (Number(ep.avgLatency ?? ep.latency) || 0),
+                    0
+                  ) / data.endpoints.length
+                : Number(data.summary?.avgLatency) || 0;
+
+              publishApiResults({
+                endpoints: data.endpoints.map((ep: any) => ({
+                  url: ep.url || '',
+                  method: ep.method || 'GET',
+                  latency: Number(ep.avgLatency ?? ep.latency) || 0,
+                  avgLatency: Number(ep.avgLatency ?? ep.latency) || 0,
+                  status: ep.status === 'error' ? 'error' : 'success',
+                  totalRequests: Number(ep.totalRequests) || 0,
+                  successful: Number(ep.successful ?? ep.successCount) || 0,
+                  failed: Number(ep.failed ?? ep.failCount) || 0,
+                  p50: Number(ep.p50 ?? ep.percentiles?.p50) || 0,
+                  p95: Number(ep.p95 ?? ep.percentiles?.p95) || 0,
+                  p99: Number(ep.p99 ?? ep.percentiles?.p99) || 0,
+                  throughput: Number(ep.throughput) || 0,
+                  percentiles: ep.percentiles || { p50: 0, p95: 0, p99: 0 },
+                })),
+                avgLatency,
+                successRate: totalRequests > 0
+                  ? Math.round((successfulRequests / totalRequests) * 100)
+                  : Number(data.summary?.totalRequests) > 0
+                    ? Math.round((Number(data.summary?.successful || 0) / Number(data.summary.totalRequests)) * 100)
+                    : 100,
+                totalRequests: totalRequests || Number(data.summary?.totalRequests) || 0,
+                throughput: Number(data.summary?.throughput) || 0,
+                percentiles: data.summary?.percentiles || {
+                  p50: 0,
+                  p95: Number(data.summary?.p95) || 0,
+                  p99: Number(data.summary?.p99) || 0,
+                },
+                rawOutput: data.rawOutput || '',
+              });
             } catch (err) {
               console.error("Error publishing api results:", err);
             }
@@ -302,7 +346,7 @@ export default function ApiTestsPage() {
       return;
     }
 
-    const normalizeUrl = (u: string) => u.replace(/\/$/, '').toLowerCase();
+    const normalizeUrl = (u: string) => u.replace(/\/$/, '').toLowerCase().replace(/^https?:\/\//, '');
     const apiEndpoints = results.api.endpoints || [];
     setTestEndpoints(prev => {
       const next = storedEndpoints.map(ep => {
@@ -332,6 +376,7 @@ export default function ApiTestsPage() {
         return { ...ep, status: "idle" as const, latency: null };
       });
       testEndpointsRef.current = next;
+      setLastTestEndpoints(next);
       return next;
     });
   }, [storedEndpoints, results]);
@@ -383,7 +428,31 @@ export default function ApiTestsPage() {
   const [headerValue, setHeaderValue] = useState("");
   const [customHeaders, setCustomHeaders] = useState<Record<string, string>>({});
   const [requestBodyJson, setRequestBodyJson] = useState("");
-  const [bodyType, setBodyType] = useState<"json" | "xml" | "urlencoded">("json");
+  const [bodyType, setBodyType] = useState<"json" | "xml" | "urlencoded" | "file" | "csv">("json");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (file.name.endsWith('.csv')) {
+        setBodyType('csv');
+        setRequestBodyJson(file.name);
+      } else if (file.name.endsWith('.json')) {
+        setBodyType('json');
+        setRequestBodyJson(content);
+      } else if (file.name.endsWith('.xml')) {
+        setBodyType('xml');
+        setRequestBodyJson(content);
+      } else {
+        setBodyType('file');
+        setRequestBodyJson(file.name);
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const [newConfig, setNewConfig] = useState<Record<string, number>>({
     concurrency: 0,
@@ -411,35 +480,26 @@ export default function ApiTestsPage() {
 
   const runAllTests = () => {
     if (running || showLoadingModal || testEndpoints.length === 0) return;
-    setShowSkeletons(true);
-    setShowLoadingModal(true);
-    setLiveMetrics({}); // Limpiar métricas para el nuevo test
-    setTestSessionId(Date.now()); // Nueva sesión al iniciar test
-    // NOTE: setLastTestEndpoints is now updated AFTER test completes (in onTestData), not here
-    setIsTestRunning('api', true);
-    clearResults(); // <-- LIMPIEZA TOTAL DE RESULTADOS ANTERIORES
-    setActiveLogs('api', "");    // <-- LIMPIEZA DE LOGS
-    if (socket) {
-      let token: string | undefined;
-      let userId: string | undefined;
-      try {
-        const auth = typeof window !== 'undefined' ? localStorage.getItem('admin-auth') : null;
-        if (auth) {
-          const parsed = JSON.parse(auth);
-          token = parsed.token;
-          userId = parsed.userId || parsed.user?.id || parsed.id;
-        }
-      } catch (e) {}
+    if (!socket) {
+      setErrorMessage("La conexión con el servidor aún no está disponible. Recarga la página e inténtalo de nuevo.");
+      setShowErrorModal(true);
+      return;
+    }
 
-      // Usamos la configuración específica de cada endpoint en lugar de una global
+    const emitTest = () => {
+      setShowSkeletons(true);
+      setShowLoadingModal(true);
+      setLiveMetrics({});
+      setTestSessionId(Date.now());
+      setIsTestRunning('api', true);
+      clearResults('api');
+      setActiveLogs('api', "");
+
       socket.emit("start-test", {
         category: 'api',
-        userId,
-        token,
         tool: selectedTool,
         endpoints: testEndpoints.map(ep => ({
           ...ep,
-          // Aseguramos que se envíen los parámetros de carga individualmente
           concurrency: ep.concurrency || 1,
           durationMs: (ep.duration || 10) * 1000,
           requests: ep.requests || 1,
@@ -449,7 +509,15 @@ export default function ApiTestsPage() {
         body: requestBodyJson,
         bodyType,
       });
+    };
+
+    if (socket.connected) {
+      emitTest();
+      return;
     }
+
+    socket.once("connect", emitTest);
+    socket.connect();
   };
 
   const validateEndpoint = (ep: EndpointTest) => {
@@ -468,6 +536,8 @@ export default function ApiTestsPage() {
       duration: ep.duration || 0,
       rampUp: ep.rampUp || 0,
     });
+    setRequestBodyJson(ep.requestBody || (ep as any).body || "");
+    setCustomHeaders(ep.headers || {});
   };
 
   const downloadGeneralPDF = () => {
@@ -500,6 +570,7 @@ export default function ApiTestsPage() {
   // Compute aggregates from displayEndpoints for accurate report numbers
   const _totalRequests = displayEndpoints.reduce((s, ep) => s + (ep.totalReqs || 0), 0);
   const _totalSuccess  = displayEndpoints.reduce((s, ep) => s + (ep.successCount || 0), 0);
+  const _totalFailed   = displayEndpoints.reduce((s, ep) => s + (ep.failCount || 0), 0);
   const _overallSuccessRate = _totalRequests > 0 ? Math.round((_totalSuccess / _totalRequests) * 100) : (results?.api?.successRate ?? 0);
 
   const generalReportData = {
@@ -527,57 +598,65 @@ export default function ApiTestsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* CONFIGURACIÓN Y PARÁMETROS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* COLUMNA DE CONFIGURACIÓN DE ENDPOINT */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/20 dark:backdrop-blur-sm">
-          <div className="grid grid-cols-1 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Endpoint URL</label>
-              <input
-                type="text"
-                value={newEndpoint}
-                disabled={running}
-                onChange={(e) => setNewEndpoint(e.target.value)}
-                placeholder="https://api.ejemplo.com/v1/usuarios"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-mono text-slate-900 outline-none focus:border-sky-500/60 dark:border-white/10 dark:bg-slate-950 dark:text-white disabled:opacity-50"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Latencia Máx (ms)</label>
-              <input
-                type="number"
-                value={newConfig.maxLatency || ""}
-                disabled={running}
-                onChange={(e) => setNewConfig(prev => ({ ...prev, maxLatency: Number(e.target.value) }))}
-                placeholder="500"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-mono text-slate-900 outline-none focus:border-sky-500/60 dark:border-white/10 dark:bg-slate-950 dark:text-white disabled:opacity-50"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400">Método HTTP</label>
-              <select
-                value={newMethod}
-                disabled={running}
-                onChange={(e) => setNewMethod(e.target.value as HttpMethod)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-sky-500/60 dark:border-white/10 dark:bg-slate-950 dark:text-white disabled:opacity-50"
-              >
-                {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-            </div>
-          </div>
+    <>
+      {/* CONFIGURACIÓN Y PARÁMETROS — rediseño premium */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-          {/* Botones de acción para endpoint */}
-          <div className="mt-4 flex gap-2">
-            <button
-              onClick={() => {
-                if (!newEndpoint.trim()) return;
+        {/* ── COLUMNA IZQUIERDA: Endpoint Config ── */}
+        <section className="relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 backdrop-blur-sm shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:border-white/8 dark:bg-slate-900/50 dark:shadow-[0_4px_24px_rgba(0,0,0,0.35)]">
+          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-sky-500 via-blue-500 to-violet-500" />
 
-                // Configuración de carga que se guardará en el endpoint
+          <div className="p-5 pt-6 space-y-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-500/10 dark:bg-sky-500/15">
+                <Globe className="h-3.5 w-3.5 text-sky-500" />
+              </div>
+              <span className="text-[11px] font-bold uppercase tracking-[.14em] text-slate-400 dark:text-slate-500">
+                Configurar Endpoint
+              </span>
+            </div>
+
+            {/* URL */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Endpoint URL</label>
+              <div className="relative">
+                <Globe className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={newEndpoint}
+                  disabled={running}
+                  onChange={(e) => setNewEndpoint(e.target.value)}
+                  placeholder="https://api.ejemplo.com/v1/recurso"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 pl-8 pr-3 py-2.5 text-xs font-mono text-slate-800 outline-none transition-all focus:border-sky-500/60 focus:bg-white focus:ring-2 focus:ring-sky-500/10 dark:border-white/8 dark:bg-slate-950/60 dark:text-slate-200 dark:placeholder-slate-600 dark:focus:bg-slate-950 disabled:opacity-50"
+                />
+              </div>
+            </div>
+
+
+
+            {/* Método */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">Método HTTP</label>
+              <div className="relative">
+                <select
+                  value={newMethod}
+                  disabled={running}
+                  onChange={(e) => setNewMethod(e.target.value as HttpMethod)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 pr-8 text-sm font-bold text-slate-800 outline-none transition-all focus:border-sky-500/60 focus:bg-white focus:ring-2 focus:ring-sky-500/10 dark:border-white/8 dark:bg-slate-950/60 dark:text-slate-200 dark:focus:bg-slate-950 disabled:opacity-50"
+                >
+                  {METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              </div>
+            </div>
+
+            {/* Add button */}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => {
+                  if (!newEndpoint.trim()) return;
                   const configToSave = {
                     ...newConfig,
-                    // Asegurar valores mínimos
                     concurrency: newConfig.concurrency || 1,
                     duration: newConfig.duration || 10,
                     requests: newConfig.requests || 1,
@@ -585,196 +664,236 @@ export default function ApiTestsPage() {
                     headers: customHeaders as any,
                     body: requestBodyJson,
                   };
-
-                if (editingId !== null) {
-                  updateEndpoint(editingId, {
-                    endpoint: newEndpoint,
-                    method: newMethod,
-                    ...configToSave,
-                  });
-                  setEditingId(null);
-                } else {
-                  addEndpoint(
-                    newEndpoint,
-                    newMethod,
-                    requestBodyJson,
-                    configToSave
-                  );
-                }
-                setNewEndpoint("");
-                setNewConfig({
-                  concurrency: 0,
-                  requests: 0,
-                  duration: 0,
-                  rampUp: 0,
-                });
-              }}
-              className="flex-1 rounded-xl bg-sky-600 hover:bg-sky-500 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition-all disabled:opacity-50"
-              disabled={running}
-            >
-              {editingId !== null ? "Actualizar Endpoint" : "Añadir Endpoint"}
-            </button>
-            {editingId !== null && (
-              <button
-                onClick={() => {
-                  setEditingId(null);
+                  if (editingId !== null) {
+                    updateEndpoint(editingId, { endpoint: newEndpoint, method: newMethod, requestBody: requestBodyJson, ...configToSave });
+                    setEditingId(null);
+                  } else {
+                    addEndpoint(newEndpoint, newMethod, requestBodyJson, configToSave);
+                  }
                   setNewEndpoint("");
-                  setNewConfig({
-                    concurrency: 0,
-                    requests: 0,
-                    duration: 0,
-                    rampUp: 0,
-                  });
+                  setNewConfig({ concurrency: 0, requests: 0, duration: 0, rampUp: 0 });
+                  setCustomHeaders({});
+                  setRequestBodyJson("");
                 }}
-                className="rounded-xl bg-slate-200 hover:bg-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 transition-all dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-white"
+                disabled={running}
+                className="flex-1 group relative overflow-hidden rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-sky-500/20 transition-all hover:from-sky-500 hover:to-blue-500 hover:shadow-sky-500/30 hover:-translate-y-px active:scale-[.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:translate-y-0"
               >
-                Cancelar
+                <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                <span className="relative flex items-center justify-center gap-1.5">
+                  <Plus className="h-4 w-4" />
+                  {editingId !== null ? "Actualizar Endpoint" : "Añadir Endpoint"}
+                </span>
               </button>
-            )}
-          </div>
-
-          {/* Headers */}
-          <div className="space-y-2 pt-4 mt-4 border-t border-slate-100 dark:border-white/5">
-            <label className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5">
-              <Key className="h-3 w-3 text-sky-500" /> Headers personalizados
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Key"
-                value={headerKey}
-                disabled={running}
-                onChange={(e) => setHeaderKey(e.target.value)}
-                className="w-1/2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs outline-none text-slate-900 focus:border-sky-500/40 dark:border-white/5 dark:bg-slate-950/40 dark:text-white disabled:opacity-50"
-              />
-              <input
-                type="text"
-                placeholder="Value"
-                value={headerValue}
-                disabled={running}
-                onChange={(e) => setHeaderValue(e.target.value)}
-                className="w-1/2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs outline-none text-slate-900 focus:border-sky-500/40 dark:border-white/5 dark:bg-slate-950/40 dark:text-white disabled:opacity-50"
-              />
-              <button onClick={addHeader} disabled={running} className="p-2 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:border-white/10 dark:text-white disabled:opacity-50">
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div>
-
-            {Object.keys(customHeaders).length > 0 && (
-              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1.5 bg-slate-50 rounded-lg border border-slate-100 dark:bg-slate-950/20 dark:border-white/5">
-                {Object.entries(customHeaders).map(([k, v]) => (
-                  <span key={k} className="inline-flex items-center gap-1 bg-sky-500/10 border border-sky-500/20 text-sky-700 dark:text-sky-400 px-2 py-0.5 rounded text-[10px] font-mono">
-                    {k}: {v}
-                    <X onClick={() => removeHeader(k)} className="h-2.5 w-2.5 cursor-pointer hover:text-red-500" />
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Body Dinámico */}
-          {["POST", "PUT", "PATCH"].includes(newMethod) && (
-            <div className="space-y-1 pt-4 mt-4 border-t border-slate-100 dark:border-white/5">
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-bold uppercase text-slate-500 dark:text-slate-400 tracking-wider flex items-center gap-1.5">
-                  <Code className="h-3 w-3 text-amber-500" /> Payload Body
-                </label>
-                <select
-                  value={bodyType}
-                  onChange={(e) => setBodyType(e.target.value as any)}
-                  className="bg-white border border-slate-200 rounded-lg px-2 py-0.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-sky-500/50 cursor-pointer dark:bg-slate-950 dark:border-white/10 dark:text-slate-300"
+              {editingId !== null && (
+                <button
+                  onClick={() => {
+                    setEditingId(null);
+                    setNewEndpoint("");
+                    setNewConfig({ concurrency: 0, requests: 0, duration: 0, rampUp: 0 });
+                    setCustomHeaders({});
+                    setRequestBodyJson("");
+                  }}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-white/10 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
                 >
-                  <option value="json">JSON</option>
-                  <option value="xml">XML</option>
-                  <option value="urlencoded">Form URL</option>
-                </select>
-              </div>
-              <textarea
-                value={requestBodyJson}
-                disabled={running}
-                onChange={(e) => setRequestBodyJson(e.target.value)}
-                placeholder={
-                  bodyType === "json" ? '{\n  "name": "test",\n  "active": true\n}' :
-                    bodyType === "xml" ? '<request>\n  <name>test</name>\n</request>' :
-                      'name=test&active=true'
-                }
-                rows={4}
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-amber-700 outline-none focus:border-amber-500/40 resize-none dark:border-white/5 dark:bg-slate-950/60 dark:text-amber-300 disabled:opacity-50"
-              />
+                  Cancelar
+                </button>
+              )}
             </div>
-          )}
+
+            {/* Headers */}
+            <div className="space-y-2.5 pt-4 border-t border-slate-100 dark:border-white/6">
+              <label className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[.14em] text-slate-400 dark:text-slate-500">
+                <Key className="h-3 w-3 text-sky-500" /> Headers Personalizados
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Key"
+                  value={headerKey}
+                  disabled={running}
+                  onChange={(e) => setHeaderKey(e.target.value)}
+                  className="w-1/2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs outline-none text-slate-800 placeholder-slate-400 transition focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/10 dark:border-white/8 dark:bg-slate-950/50 dark:text-white dark:placeholder-slate-600 disabled:opacity-50"
+                />
+                <input
+                  type="text"
+                  placeholder="Value"
+                  value={headerValue}
+                  disabled={running}
+                  onChange={(e) => setHeaderValue(e.target.value)}
+                  className="w-1/2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-xs outline-none text-slate-800 placeholder-slate-400 transition focus:border-sky-500/50 focus:ring-1 focus:ring-sky-500/10 dark:border-white/8 dark:bg-slate-950/50 dark:text-white dark:placeholder-slate-600 disabled:opacity-50"
+                />
+                <button
+                  onClick={addHeader}
+                  disabled={running}
+                  className="flex items-center justify-center p-2 rounded-lg border border-slate-200 bg-slate-50 text-sky-600 transition hover:bg-sky-500 hover:text-white hover:border-sky-500 dark:border-white/10 dark:bg-slate-800 dark:text-sky-400 dark:hover:bg-sky-600 dark:hover:text-white disabled:opacity-50"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {Object.keys(customHeaders).length > 0 && (
+                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto rounded-lg border border-slate-100 bg-slate-50/80 p-2 dark:border-white/5 dark:bg-slate-950/30">
+                  {Object.entries(customHeaders).map(([k, v]) => (
+                    <span key={k} className="inline-flex items-center gap-1 rounded-md bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 text-[10px] font-mono text-sky-700 dark:text-sky-300">
+                      <span className="font-bold">{k}</span>: {v}
+                      <X onClick={() => removeHeader(k)} className="h-2.5 w-2.5 cursor-pointer opacity-60 hover:opacity-100 hover:text-red-500 transition-opacity" />
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </section>
 
-        {/* PARÁMETROS CONFIGURABLES */}
-        <section className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-slate-900/20 dark:backdrop-blur-sm flex flex-col justify-between">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-white/5 pb-2 mb-4">
-              Parámetros Configurables ({activeSchema?.label || selectedTool?.toUpperCase()})
-            </h2>
+        {/* ── COLUMNA DERECHA: Parámetros + Body + Actions ── */}
+        <section className="lg:col-span-2 relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white/90 backdrop-blur-sm shadow-[0_4px_24px_rgba(0,0,0,0.06)] dark:border-white/8 dark:bg-slate-900/50 dark:shadow-[0_4px_24px_rgba(0,0,0,0.35)] flex flex-col">
+          <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500" />
+
+          <div className="p-5 pt-6 flex-1 flex flex-col">
+            {/* Title */}
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500/10 dark:bg-emerald-500/15">
+                <Gauge className="h-3.5 w-3.5 text-emerald-500" />
+              </div>
+              <span className="text-[11px] font-bold uppercase tracking-[.14em] text-slate-400 dark:text-slate-500">
+                Parámetros Configurables
+              </span>
+              {activeSchema?.label && (
+                <span className="ml-auto inline-flex items-center rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                  {activeSchema.label}
+                </span>
+              )}
+            </div>
+
+            {/* Params grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {activeSchema?.parameters?.map((param: any) => (
-                <div key={param.id}>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">
-                    {param.label}
-                  </label>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1 leading-tight">{param.description}</p>
+                <div key={param.id} className="space-y-1.5">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                      {param.label}
+                    </label>
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5 leading-snug">{param.description}</p>
+                  </div>
                   <input
                     type={param.type}
                     disabled={running}
                     value={isNaN(newConfig[param.id]) ? "" : newConfig[param.id]}
                     onChange={(e) => {
-                      const val = e.target.value;
-                      const num = Number(val);
+                      const num = Number(e.target.value);
                       setNewConfig(prev => ({ ...prev, [param.id]: isNaN(num) ? 0 : num }));
                     }}
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-500/50 dark:border-white/10 dark:bg-slate-950/40 dark:text-white disabled:opacity-50"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none transition-all focus:border-emerald-500/60 focus:bg-white focus:ring-2 focus:ring-emerald-500/10 dark:border-white/8 dark:bg-slate-950/50 dark:text-white dark:focus:bg-slate-950 disabled:opacity-50"
                   />
                 </div>
               ))}
-
               {!activeSchema && (
-                <p className="text-xs text-slate-400 dark:text-slate-500 col-span-2">No se requieren configuraciones adicionales para esta herramienta.</p>
+                <div className="col-span-2 flex items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/50 p-4 dark:border-white/8 dark:bg-slate-950/20">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800">
+                    <Server className="h-4 w-4 text-slate-400" />
+                  </div>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">No se requieren configuraciones adicionales.</p>
+                </div>
               )}
             </div>
-          </div>
 
-          <div className="mt-5 flex gap-2">
-            <button
-              onClick={runAllTests}
-              disabled={running || showLoadingModal || testEndpoints.length === 0}
-              className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-3 text-sm font-bold text-white hover:from-emerald-500 hover:to-teal-500 shadow-md disabled:opacity-30 disabled:cursor-not-allowed transition-all relative overflow-hidden"
-            >
-              {running || showLoadingModal ? (
-                <>
-                  <Activity className="h-4 w-4 animate-spin" />
-                  <span>PROCESANDO PRUEBAS EN TIEMPO REAL...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" />
-                  <span>EJECUTAR BATERÍA DE PRUEBAS COMPLETA</span>
-                </>
-              )}
-            </button>
-            {running ? (
+            {/* Payload body */}
+            {["POST", "PUT", "PATCH"].includes(newMethod) && (
+              <div className="mt-5 space-y-2.5 pt-5 border-t border-slate-100 dark:border-white/6">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[.14em] text-slate-400 dark:text-slate-500">
+                    <div className="flex h-5 w-5 items-center justify-center rounded bg-amber-500/10">
+                      <Code className="h-3 w-3 text-amber-500" />
+                    </div>
+                    Payload Body / Carga
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".json,.xml,.csv,.txt" className="hidden" />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 shadow-sm transition hover:bg-sky-50 hover:text-sky-600 hover:border-sky-300 dark:border-white/10 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    >
+                      <Upload className="h-3 w-3" /> Cargar Archivo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRequestBodyJson("")}
+                      className="rounded-lg px-2.5 py-1 text-[11px] font-semibold text-slate-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                    >
+                      Limpiar
+                    </button>
+                    <select
+                      value={bodyType}
+                      onChange={(e) => {
+                        const val = e.target.value as any;
+                        setBodyType(val);
+                        if (val === 'csv') setRequestBodyJson("requests_resultado.csv");
+                        else if (val === 'file') setRequestBodyJson("");
+                      }}
+                      className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700 outline-none transition focus:border-sky-500/50 cursor-pointer dark:border-white/10 dark:bg-slate-800 dark:text-slate-300"
+                    >
+                      <option value="json">JSON</option>
+                      <option value="xml">XML</option>
+                      <option value="urlencoded">Form URL</option>
+                      <option value="csv">CSV</option>
+                      <option value="file">Archivo</option>
+                    </select>
+                  </div>
+                </div>
+                <textarea
+                  value={requestBodyJson}
+                  disabled={running}
+                  onChange={(e) => setRequestBodyJson(e.target.value)}
+                  placeholder={
+                    bodyType === "json"  ? '{\n  "name": "test",\n  "active": true\n}' :
+                    bodyType === "xml"   ? '<request>\n  <name>test</name>\n</request>' :
+                    bodyType === "csv"   ? 'requests_resultado.csv' : 'name=test&active=true'
+                  }
+                  rows={4}
+                  className="w-full rounded-xl border border-slate-200 bg-slate-950 p-3 font-mono text-xs text-amber-300 outline-none transition focus:border-amber-500/50 focus:ring-2 focus:ring-amber-500/10 resize-none placeholder-slate-700 dark:border-white/8 disabled:opacity-50"
+                />
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="mt-5 flex gap-2.5">
               <button
-                onClick={() => socket?.emit('cancel-test')}
-                className="flex items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-500 px-4 py-3 text-sm font-bold text-white shadow-md transition-all"
+                onClick={runAllTests}
+                disabled={running || showLoadingModal || testEndpoints.length === 0}
+                className="flex-1 group relative overflow-hidden rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 transition-all hover:from-emerald-500 hover:to-teal-500 hover:shadow-emerald-500/30 hover:-translate-y-px active:scale-[.98] disabled:opacity-30 disabled:cursor-not-allowed disabled:translate-y-0 disabled:shadow-none"
               >
-                <X className="h-4 w-4" />
-                <span>CANCELAR PRUEBA</span>
+                <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                <span className="relative flex items-center justify-center gap-2">
+                  {running || showLoadingModal ? (
+                    <><Activity className="h-4 w-4 animate-spin" />PROCESANDO EN TIEMPO REAL...</>
+                  ) : (
+                    <><Play className="h-4 w-4" />EJECUTAR BATERÍA DE PRUEBAS COMPLETA</>
+                  )}
+                </span>
               </button>
-            ) : testEndpoints.length > 0 ? (
-              <button
-                onClick={clearEndpoints}
-                className="flex items-center justify-center gap-2 rounded-xl bg-orange-600 hover:bg-orange-500 px-4 py-3 text-sm font-bold text-white shadow-md transition-all"
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>LIMPIAR ENDPOINTS</span>
-              </button>
-            ) : null}
+              {running ? (
+                <button
+                  onClick={() => socket?.emit('cancel-test')}
+                  className="group relative overflow-hidden rounded-xl bg-red-600 hover:bg-red-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-red-500/20 transition-all hover:-translate-y-px active:scale-[.98]"
+                >
+                  <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                  <span className="relative flex items-center gap-2"><X className="h-4 w-4" />CANCELAR</span>
+                </button>
+              ) : testEndpoints.length > 0 ? (
+                <button
+                  onClick={clearEndpoints}
+                  className="group relative overflow-hidden rounded-xl bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-orange-500/20 transition-all hover:-translate-y-px active:scale-[.98]"
+                >
+                  <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+                  <span className="relative flex items-center gap-2"><Trash2 className="h-4 w-4" />LIMPIAR</span>
+                </button>
+              ) : null}
+            </div>
           </div>
         </section>
+
+
+
       </div>
 
       {/* COLA DE ENDPOINTS */}
@@ -1029,6 +1148,15 @@ export default function ApiTestsPage() {
                       p99: Math.round(displayEndpoints.reduce((s, e) => s + (e.p99 || 0), 0) / Math.max(1, displayEndpoints.length)),
                     } : undefined),
                   }} />
+                  <AIDiagnosticReport summary={{
+                    totalRequests: _totalRequests || (results?.api as any)?.totalRequests || 0,
+                    successful: _totalSuccess || (results?.api as any)?.successful || 0,
+                    failed: _totalFailed || (results?.api as any)?.failed || 0,
+                    avgLatency: results.api?.avgLatency || 0,
+                    p95: (results?.api as any)?.percentiles?.p95 || 0,
+                    p99: (results?.api as any)?.percentiles?.p99 || 0,
+                    throughput: (results?.api as any)?.throughput || 0,
+                  }} />
                 </div>
 
                 {/* TABLA DE MÉTRICAS AVANZADAS INTEGRADA */}
@@ -1282,6 +1410,13 @@ export default function ApiTestsPage() {
               onClose={() => setInspectingEndpoint(null)} 
             />
         )}
-    </div>
+
+        <GlobalErrorModal
+          isOpen={showErrorModal}
+          onClose={() => setShowErrorModal(false)}
+          title="Alerta de Sistema // Prueba de Carga"
+          message={errorMessage || "Se detectaron anomalías o saturación en el servidor remoto durante la ejecución."}
+        />
+    </>
   );
 }

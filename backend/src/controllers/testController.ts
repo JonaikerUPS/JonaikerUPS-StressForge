@@ -62,7 +62,7 @@ export const getStatus = async (_req: Request, res: Response): Promise<void> => 
 export const launchTest = async (req: Request, res: Response): Promise<void> => {
   console.log("DEBUG: launchTest received request body:", JSON.stringify(req.body));
   try {
-    const { targetUrl, toolUsed, virtualUsers } = req.body;
+    const { targetUrl, toolUsed, virtualUsers, isCustomYaml, customYaml, body } = req.body;
     const { userId } = (req as any).user;
     
     // Si toolUsed es "all", convertimos a la lista completa
@@ -85,7 +85,11 @@ export const launchTest = async (req: Request, res: Response): Promise<void> => 
       targetUrl,
       virtualUsers || 10,
       req.body.durationMs || 10000,
-      req.body.endpoints
+      req.body.endpoints,
+      req.body.requests,
+      req.body.category || 'stress',
+      isCustomYaml,
+      customYaml || body
     );
 
     res.status(201).json({
@@ -129,7 +133,11 @@ export const saveTestResult = async (req: Request, res: Response): Promise<void>
 export const getTestsHistory = async (req: Request, res: Response): Promise<void> => {
   try {
     const { userId } = (req as any).user || {};
-    const query = userId ? { $or: [{ userId }, { userId: null }, { userId: { $exists: false } }, { userId: "" }] } : {};
+    if (!userId) {
+      res.status(401).json({ error: 'Usuario no autenticado' });
+      return;
+    }
+    const query = { userId };
     const tests = await TestRun.find(query).sort({ createdAt: -1 });
     res.status(200).json(tests);
   } catch (error: any) {
@@ -141,7 +149,11 @@ export const getTestsHistory = async (req: Request, res: Response): Promise<void
 export const getResultsHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       const { userId } = (req as any).user || {};
-      const query = userId ? { $or: [{ userId }, { userId: null }, { userId: { $exists: false } }, { userId: "" }] } : {};
+        if (!userId) {
+          res.status(401).json({ error: 'Usuario no autenticado' });
+          return;
+        }
+        const query = { userId };
       const results = await TestResult.find(query).sort({ createdAt: -1 });
       res.status(200).json(results);
     } catch (error: any) {
@@ -153,8 +165,11 @@ export const getResultsHistory = async (req: Request, res: Response): Promise<vo
 export const getLatestEndpointResults = async (req: Request, res: Response): Promise<void> => {
     try {
       const { userId } = (req as any).user || {};
-      const query = userId ? { $or: [{ userId }, { userId: null }, { userId: { $exists: false } }, { userId: "" }] } : {};
-      // Retornar los resultados recientes para este usuario o globales
+        if (!userId) {
+          res.status(401).json({ error: 'Usuario no autenticado' });
+          return;
+        }
+        const query = { userId };
       const results = await TestResult.find(query)
         .sort({ createdAt: -1 })
         .limit(100);

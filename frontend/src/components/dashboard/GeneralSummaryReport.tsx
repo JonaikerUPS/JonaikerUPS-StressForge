@@ -52,14 +52,16 @@ export const GeneralSummaryReport = ({ reportData }: GeneralSummaryReportProps) 
         </div>
       </div>
 
-      {reportData.percentiles && (
+      {reportData.percentiles && Object.keys(reportData.percentiles).length > 0 && (
         <div className="mt-6">
           <h3 className="text-md font-bold mb-2">📊 Percentiles de Latencia (ms)</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             {Object.entries(reportData.percentiles).map(([p, val]) => (
-              <div key={p} className={`p-2 rounded text-center ${t('bg-slate-800', 'bg-slate-100')}`}>
-                <span className={`text-[10px] uppercase ${t('text-slate-400', 'text-slate-500')}`}>{p}</span>
-                <p className="font-mono font-bold">{val.toFixed(2)}ms</p>
+              <div key={p} className={`p-3 rounded-xl border ${t('bg-slate-950 border-slate-800', 'bg-slate-50 border-slate-200')} text-center`}>
+                <span className={`text-[11px] font-mono uppercase ${t('text-sky-400', 'text-sky-600')}`}>
+                  {p.startsWith('p') ? p.toUpperCase() : `P${p}`}
+                </span>
+                <p className="font-mono font-bold text-base mt-1">{(Number(val) || 0).toFixed(2)}ms</p>
               </div>
             ))}
           </div>

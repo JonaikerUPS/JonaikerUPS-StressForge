@@ -5,6 +5,7 @@ const mongoose_1 = require("mongoose");
 const testRunSchema = new mongoose_1.Schema({
     targetUrl: { type: String, required: true },
     toolUsed: { type: String, required: true },
+    userId: { type: String }, // Nuevo
     virtualUsers: { type: Number, default: 10 },
     durationMs: { type: Number },
     status: {

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type Dispatch, type SetStateAction } from "react";
 import { useSocket } from "./socket-context";
+import { useAuth } from "./auth-context";
 import { getBackendUrl } from '@/lib/api-url';
 
 export interface ApiEndpointResult {
@@ -58,7 +59,7 @@ interface TestResultsContextType {
   publishCacheResults: (r: CacheTestResult) => void;
   publishSecurityResults: (r: SecurityTestResult) => void;
   publishFileResults: (r: FileTestResult) => void;
-  clearResults: (category?: TestCategory) => void;
+  clearResults: (category?: TestCategory, options?: { hard?: boolean }) => Promise<void>;
 }
 
 const emptyResults: TestResults = { api: null, websocket: null, database: null, load: null, network: null, cache: null, security: null, files: null, system: null };
@@ -66,25 +67,42 @@ const BACKEND_URL = getBackendUrl();
 const LS_KEY = "stressforge_test_results";
 const TestResultsContext = createContext<TestResultsContextType | null>(null);
 
+function getScopedKey(userId: string | null | undefined) {
+  return `${LS_KEY}:${userId || "guest"}`;
+}
+
 // ── localStorage helpers ───────────────────────────────────────────────
-function saveToLS(r: TestResults) {
+function saveToLS(r: TestResults, key: string) {
   try {
     if (typeof window !== "undefined") {
-      localStorage.setItem(LS_KEY, JSON.stringify({ ts: Date.now(), data: r }));
+      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: r }));
     }
   } catch { /* quota or SSR */ }
 }
 
-function loadFromLS(): TestResults | null {
+function loadFromLS(key: string): TestResults | null {
   try {
     if (typeof window === "undefined") return null;
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     // Expire after 24 h
     if (Date.now() - (parsed.ts || 0) > 86_400_000) return null;
     return parsed.data as TestResults;
   } catch { return null; }
+}
+
+function mergePersistedResults(current: TestResults, incoming: TestResults): TestResults {
+  const next: TestResults = { ...current };
+
+  (Object.keys(incoming) as (keyof TestResults)[]).forEach((key) => {
+    const value = incoming[key];
+    if (value !== null && value !== undefined) {
+      Object.assign(next, { [key]: value });
+    }
+  });
+
+  return next;
 }
 
 function getAuthToken(): string | null {
@@ -113,13 +131,13 @@ function dbResultsToApiResult(docs: any[]): ApiTestResult | null {
 
     const latestDocs = endpointMap.size > 0 ? Array.from(endpointMap.values()) : apiDocs.slice(0, 10);
 
-    const totalRequests = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.totalRequests || 0), 0);
-    const successCount  = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.successCount || 0), 0);
-    const avgLatency    = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.latency?.avg || 0), 0) / Math.max(1, latestDocs.length);
-    const throughput    = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.rps || 0), 0);
+    const totalRequests = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.totalRequests) || 0), 0);
+    const successCount  = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.successCount) || 0), 0);
+    const avgLatency    = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.latency?.avg) || 0), 0) / Math.max(1, latestDocs.length);
+    const throughput    = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.rps) || 0), 0);
     const successRate   = totalRequests > 0 ? Math.round((successCount / totalRequests) * 100) : 100;
-    const p95 = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.latency?.p95 || 0), 0) / Math.max(1, latestDocs.length);
-    const p99 = latestDocs.reduce((s: number, d: any) => s + (d.metrics?.latency?.p99 || 0), 0) / Math.max(1, latestDocs.length);
+    const p95 = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.latency?.p95) || 0), 0) / Math.max(1, latestDocs.length);
+    const p99 = latestDocs.reduce((s: number, d: any) => s + (Number(d.metrics?.latency?.p99) || 0), 0) / Math.max(1, latestDocs.length);
 
     const endpoints: ApiEndpointResult[] = latestDocs.map((d: any) => ({
         url: d.endpoint || '',
@@ -209,47 +227,62 @@ function dbResultsToAllResults(docs: any[]): TestResults {
 }
 
 export function TestResultsProvider({ children }: { children: ReactNode }) {
-  // Hydrate immediately from localStorage so the UI is never blank on reload
-  const [results, setResults] = useState<TestResults>(() => loadFromLS() ?? emptyResults);
+  const { user } = useAuth();
+  const storageKey = getScopedKey(user?.userId);
+  const [results, setResults] = useState<TestResults>(emptyResults);
+  const [resultsReady, setResultsReady] = useState(false);
   const [activeLogs, setActiveLogs] = useState<Record<string, string>>({});
   const [isTestRunning, setIsTestRunning] = useState<Record<string, boolean>>({});
   const [showLoadingModal, setShowLoadingModal] = useState<boolean>(false);
   const socket = useSocket();
   const hydratedFromDB = useRef(false);
 
+  useEffect(() => {
+    setResults(loadFromLS(storageKey) ?? emptyResults);
+    setActiveLogs({});
+    setIsTestRunning({});
+    hydratedFromDB.current = false;
+    setResultsReady(true);
+  }, [storageKey]);
+
   // Persist to localStorage whenever results change
   useEffect(() => {
-    console.log("[DEBUG] Saving to LS:", results);
-    saveToLS(results);
-  }, [results]);
+    if (resultsReady) saveToLS(results, storageKey);
+  }, [results, resultsReady, storageKey]);
 
-    // On mount: fetch latest from DB and update state (silent background hydration)
-    useEffect(() => {
-        if (hydratedFromDB.current) return;
-        hydratedFromDB.current = true;
+  const hydrateFromDatabase = useCallback(async () => {
+    const token = getAuthToken();
+    if (!token) return;
 
-        const token = getAuthToken();
-        if (!token) return;
+    try {
+      console.log("[DEBUG] Fetching latest results from DB...");
+      const response = await fetch(`${BACKEND_URL}/api/tests/results/latest`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
 
-        console.log("[DEBUG] Fetching latest results from DB...");
-        fetch(`${BACKEND_URL}/api/tests/results/latest`, {
-            headers: { Authorization: `Bearer ${token}` },
-        })
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP error! status: ${r.status}`);
-                return r.json();
-            })
-            .catch((err) => { 
-                console.error("[DEBUG] Error fetching from DB:", err); 
-                return null; 
-            })
-            .then((docs: any[] | null) => {
-                if (!docs) return;
-                const hydratedResults = dbResultsToAllResults(docs);
-                console.log("[DEBUG] Hydrated All Results successfully.");
-                setResults(prev => ({ ...prev, ...hydratedResults }));
-            });
-    }, []);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const docs = await response.json();
+      if (!Array.isArray(docs) || docs.length === 0) {
+        return;
+      }
+
+      const hydratedResults = dbResultsToAllResults(docs);
+      console.log("[DEBUG] Hydrated All Results successfully.");
+      setResults((prev) => mergePersistedResults(prev, hydratedResults));
+    } catch (err) {
+      console.error("[DEBUG] Error fetching from DB:", err);
+    }
+  }, []);
+
+  // On mount: fetch latest from DB and update state (silent background hydration)
+  useEffect(() => {
+    if (!resultsReady || hydratedFromDB.current) return;
+    hydratedFromDB.current = true;
+    hydrateFromDatabase();
+  }, [hydrateFromDatabase, resultsReady, storageKey]);
 
   const handleSetActiveLogs = useCallback((category: string, log: string | ((prev: string) => string)) => {
       setActiveLogs(prev => {
@@ -267,6 +300,7 @@ export function TestResultsProvider({ children }: { children: ReactNode }) {
     if (!socket) return;
     
     socket.on("test-started", (data: any) => {
+      if (data?.userId && data.userId !== user?.userId) return;
         const category = data.type || 'api';
         handleSetIsTestRunning(category, true);
         if (category === 'api') setShowLoadingModal(true);
@@ -274,6 +308,7 @@ export function TestResultsProvider({ children }: { children: ReactNode }) {
     });
     
     socket.on("test-suite-complete", (data: any) => {
+      if (data?.userId && data.userId !== user?.userId) return;
         const category = data.testType || 'api';
         handleSetIsTestRunning(category, false);
         if (category === 'api') setShowLoadingModal(false);
@@ -281,6 +316,7 @@ export function TestResultsProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on("test-update", (data: any) => {
+      if (data?.userId && data.userId !== user?.userId) return;
         const category = data.testType || 'api';
         if (data.type === "log" && data.log) {
             handleSetActiveLogs(category, `[${data.tool}] ${data.log}\n`);
@@ -311,6 +347,7 @@ export function TestResultsProvider({ children }: { children: ReactNode }) {
     socket.on("test-data", (data: any) => {
         console.log("[DEBUG] Received test-data event:", data);
         if (!data) return;
+      if (data.userId && data.userId !== user?.userId) return;
         const category = data.testType || 'api';
         if (data.type === "complete") {
             console.log("[DEBUG] Processing complete data for category:", category);
@@ -416,30 +453,36 @@ export function TestResultsProvider({ children }: { children: ReactNode }) {
         socket.off("test-update");
         socket.off("test-data");
     };
-  }, [socket, handleSetActiveLogs, handleSetIsTestRunning]);
+  }, [socket, handleSetActiveLogs, handleSetIsTestRunning, user?.userId]);
 
-  const clearResults = useCallback(async (category?: TestCategory) => {
+  const clearResults = useCallback(async (category?: TestCategory, options?: { hard?: boolean }) => {
+    const hardClear = Boolean(options?.hard);
     const token = getAuthToken();
+
+    if (hardClear) {
+      if (category) {
+        if (token) {
+          await fetch(`${BACKEND_URL}/api/tests/results/${category}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${token}` }
+          }).catch(console.error);
+        }
+      } else if (token) {
+        await fetch(`${BACKEND_URL}/api/tests/clear`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(console.error);
+      }
+    }
+
     if (category) {
-        if (token) {
-            await fetch(`${BACKEND_URL}/api/tests/results/${category}`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` }
-            }).catch(console.error);
-        }
-        setResults(prev => ({ ...prev, [category]: null }));
-        setActiveLogs(prev => ({ ...prev, [category]: "" }));
-        setIsTestRunning(prev => ({ ...prev, [category]: false }));
+      setResults(prev => ({ ...prev, [category]: null }));
+      setActiveLogs(prev => ({ ...prev, [category]: "" }));
+      setIsTestRunning(prev => ({ ...prev, [category]: false }));
     } else {
-        if (token) {
-            await fetch(`${BACKEND_URL}/api/tests/clear`, {
-                method: 'DELETE',
-                headers: { Authorization: `Bearer ${token}` }
-            }).catch(console.error);
-        }
-        setResults(emptyResults);
-        setActiveLogs({});
-        setIsTestRunning({});
+      setResults(emptyResults);
+      setActiveLogs({});
+      setIsTestRunning({});
     }
   }, []);
 

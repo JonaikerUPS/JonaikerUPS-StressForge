@@ -1,13 +1,15 @@
 export const generateToolScript = (ep: any, tool: string): string => {
   const method = ep.method || 'GET';
   const url = ep.endpoint || 'http://localhost';
-  const body = ep.requestBody || '{}';
+  const rawBody = ep.requestBody || (ep as any).body || '';
+  const hasBody = rawBody && String(rawBody).trim() !== '' && String(rawBody).trim() !== '{}';
   
   const formattedBody = (() => {
+    if (!hasBody) return '{}';
     try {
-      return JSON.stringify(JSON.parse(body), null, 2);
+      return JSON.stringify(JSON.parse(rawBody), null, 2);
     } catch {
-      return body;
+      return rawBody;
     }
   })();
 
@@ -40,6 +42,20 @@ export default function () {
         execParams.push(`    iterations: ${ep.requests}`);
       }
 
+      let bodyPart = '';
+      if (hasBody) {
+        try {
+          const parsed = JSON.parse(rawBody);
+          const jsonFormatted = JSON.stringify(parsed, null, 2)
+            .split('\n')
+            .map(l => `          ${l}`)
+            .join('\n');
+          bodyPart = `\n        json:\n${jsonFormatted}`;
+        } catch {
+          bodyPart = `\n        body: |\n${formattedBody.split('\n').map(l => `          ${l}`).join('\n')}`;
+        }
+      }
+
       return `execution:
 ${execParams.join('\n')}
 
@@ -49,9 +65,7 @@ scenarios:
       - url: ${url}
         method: ${method}
         headers:
-${headersString ? headersString.split('\n').map(h => `          ${h}`).join('\n') : '          Content-Type: application/json'}
-        body: |
-${formattedBody.split('\n').map(l => `          ${l}`).join('\n')}`;
+${headersString ? headersString.split('\n').map(h => `          ${h}`).join('\n') : '          Content-Type: application/json'}${bodyPart}`;
     }
 
     case 'artillery':
@@ -88,13 +102,13 @@ class QuickstartUser(HttpUser):
 </HTTPSamplerProxy>`;
 
     case 'autocannon':
-      return `npx autocannon -c ${ep.concurrency || 10} -d ${ep.duration || 10} -m ${method} -b '${body}' "${url}"`;
+      return `npx autocannon -c ${ep.concurrency || 10} -d ${ep.duration || 10} -m ${method} -b '${rawBody || '{}'}' "${url}"`;
 
     case 'hey':
-      return `hey -n ${ep.requests || 100} -c ${ep.concurrency || 10} -m ${method} -d '${body}' "${url}"`;
+      return `hey -n ${ep.requests || 100} -c ${ep.concurrency || 10} -m ${method} -d '${rawBody || '{}'}' "${url}"`;
 
     case 'bombardier':
-      return `bombardier -c ${ep.concurrency || 10} -n ${ep.requests || 100} -m ${method} -b '${body}' "${url}"`;
+      return `bombardier -c ${ep.concurrency || 10} -n ${ep.requests || 100} -m ${method} -b '${rawBody || '{}'}' "${url}"`;
 
     case 'vegeta':
       return `echo "GET ${url}" | vegeta attack -rate=${ep.concurrency || 10} -duration=${ep.duration || 10}s | vegeta report`;

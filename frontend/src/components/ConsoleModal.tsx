@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Terminal, X, Minimize2, Maximize2, ZoomIn, ZoomOut, Maximize, Minimize } from "lucide-react";
+import { Terminal, X, Minimize2, Maximize2, ZoomIn, ZoomOut, Maximize, Minimize, Type } from "lucide-react";
 import { useSocket } from "@/lib/socket-context";
 import { useTheme } from "@/lib/theme-context";
 
@@ -70,28 +70,47 @@ export function ConsoleModal({ isOpen, onClose, logs }: { isOpen: boolean; onClo
             <span className="text-sm font-mono">Consola</span>
         </div>
         
-        <div className="flex items-center gap-2">
-          <button onClick={() => setFontSize(prev => Math.min(prev + 2, 24))} className={t('text-slate-400 hover:text-white', 'text-slate-500 hover:text-slate-900')}>
-            <ZoomIn className="h-4 w-4" />
-          </button>
-          <button onClick={() => setFontSize(prev => Math.max(prev - 2, 8))} className={t('text-slate-400 hover:text-white', 'text-slate-500 hover:text-slate-900')}>
-            <ZoomOut className="h-4 w-4" />
-          </button>
-          <button onClick={() => setIsFullscreen(!isFullscreen)} className={t('text-slate-400 hover:text-white', 'text-slate-500 hover:text-slate-900')}>
+        <div className="flex items-center gap-1">
+          {/* Zoom control group */}
+          <div className={`flex items-center rounded-md border ${t('border-slate-700 bg-slate-900', 'border-slate-300 bg-slate-200')} overflow-hidden`}>
+            <button
+              onClick={() => setFontSize(prev => Math.max(prev - 2, 8))}
+              disabled={fontSize <= 8}
+              title="Reducir tamaño de letra"
+              className={`px-2 py-1 text-xs transition-colors disabled:opacity-30 ${t('text-slate-400 hover:text-white hover:bg-slate-700', 'text-slate-500 hover:text-slate-900 hover:bg-slate-300')}`}
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+            <span className={`px-2 text-[11px] font-mono font-bold select-none min-w-[36px] text-center ${t('text-sky-400', 'text-sky-600')}`}>
+              {fontSize}px
+            </span>
+            <button
+              onClick={() => setFontSize(prev => Math.min(prev + 2, 32))}
+              disabled={fontSize >= 32}
+              title="Aumentar tamaño de letra"
+              className={`px-2 py-1 text-xs transition-colors disabled:opacity-30 ${t('text-slate-400 hover:text-white hover:bg-slate-700', 'text-slate-500 hover:text-slate-900 hover:bg-slate-300')}`}
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className={`w-px h-4 mx-1 ${t('bg-slate-700', 'bg-slate-300')}`} />
+
+          <button onClick={() => setIsFullscreen(!isFullscreen)} title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} className={`p-1.5 rounded transition-colors ${t('text-slate-400 hover:text-white hover:bg-slate-700', 'text-slate-500 hover:text-slate-900 hover:bg-slate-200')}`}>
             {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </button>
-          <button onClick={() => setMinimized(!minimized)} className={t('text-slate-400 hover:text-white', 'text-slate-500 hover:text-slate-900')}>
+          <button onClick={() => setMinimized(!minimized)} title={minimized ? 'Restaurar' : 'Minimizar'} className={`p-1.5 rounded transition-colors ${t('text-slate-400 hover:text-white hover:bg-slate-700', 'text-slate-500 hover:text-slate-900 hover:bg-slate-200')}`}>
             {minimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
           </button>
-          <button onClick={onClose} className={t('text-slate-400 hover:text-white', 'text-slate-500 hover:text-slate-900')}>
+          <button onClick={onClose} title="Cerrar consola" className={`p-1.5 rounded transition-colors ${t('text-slate-400 hover:text-red-400 hover:bg-slate-700', 'text-slate-500 hover:text-red-600 hover:bg-slate-200')}`}>
             <X className="h-4 w-4" />
           </button>
         </div>
       </div>
       
       {!minimized && (
-        <pre className="h-full w-full overflow-y-auto bg-slate-950 p-4 font-mono whitespace-pre" style={{ fontSize: `${fontSize}px` }}>
-          {liveLogs}
+        <pre className="h-full w-full overflow-y-auto bg-slate-950 p-4 font-mono whitespace-pre text-emerald-400 shadow-inner" style={{ fontSize: `${fontSize}px` }}>
+          {liveLogs || "[SISTEMA] Consola lista. Esperando eventos de ejecución..."}
         </pre>
       )}
     </div>

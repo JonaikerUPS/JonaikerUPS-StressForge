@@ -633,6 +633,26 @@ interface SectionData {
 
 const getSections = (): SectionData[] => [
   {
+    id: "guia-inicio",
+    title: "Guía de Inicio Rápido",
+    subtitle: "Pasos fundamentales para comenzar a testear",
+    icon: ExternalLink,
+    badge: "Getting Started",
+    content: () => (
+      <div className="space-y-6">
+        <p className="text-slate-600 dark:text-slate-300 text-base">
+          Sigue estos pasos para ejecutar tu primera prueba de rendimiento con <strong>StressForge</strong>:
+        </p>
+        <ol className="list-decimal list-inside space-y-4 text-slate-700 dark:text-slate-300">
+          <li><strong>Configuración:</strong> Define tu escenario en el panel de configuración (endpoints, método HTTP, payloads).</li>
+          <li><strong>Selección de Motor:</strong> Elige la herramienta adecuada según tu protocolo (ej. k6 para APIs, Locust para flujos complejos).</li>
+          <li><strong>Ejecución:</strong> Inicia el test y monitorea en tiempo real mediante la consola de telemetría distribuida.</li>
+          <li><strong>Análisis:</strong> Revisa los resultados estadísticos P50/P95/P99 en el dashboard una vez finalizada la carga.</li>
+        </ol>
+      </div>
+    )
+  },
+  {
     id: "intro",
     title: "Arquitectura del Sistema",
     subtitle: "Visión general de la infraestructura y orquestación de StressForge",
@@ -1204,7 +1224,7 @@ export default function DocumentationPage() {
       {/* ÁREA PRINCIPAL DE CONTENIDO */}
       <main className="flex-1 flex flex-col overflow-y-auto bg-slate-100 dark:bg-[#070A11] p-8">
 
-        <div className="mx-auto w-full space-y-6">
+        <div className="mx-auto w-full max-w-[120rem] space-y-6">
 
           {/* HEADER DE LA SECCIÓN ACTIVA */}
           <div className="relative overflow-hidden p-8 sm:p-10 rounded-3xl bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-2xl">

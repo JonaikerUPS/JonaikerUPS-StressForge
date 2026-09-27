@@ -26,11 +26,14 @@ class VegetaAdapter {
         return {
             tool: 'vegeta',
             timestamp: Date.now(),
-            latency: { avg: avgLatency / count, p95: avgLatency / count, p99: avgLatency / count },
+            latency: { avg: avgLatency / count, p50: avgLatency / count, p95: avgLatency / count, p99: avgLatency / count },
             throughput: count,
             errorRate: (errors / count) * 100,
             cpuUsage: 0,
             ramUsage: 0,
+            totalRequests: count,
+            successCount: count - errors,
+            failCount: errors,
         };
     }
 }

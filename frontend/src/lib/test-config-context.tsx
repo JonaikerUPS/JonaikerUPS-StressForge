@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { getBackendUrl } from "@/lib/api-url";
 
 export type TestTool = "jmeter" | "locust" | "k6" | "artillery" | "taurus" | "hey" | "autocannon";
 export type ToolOption = TestTool | "all" | "simulacion";
@@ -60,7 +61,7 @@ export function TestConfigProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(TOOL_KEY, tool); } catch { /* noop */ }
   };
 
-  const backendUrl = "http://localhost:4000";
+  const backendUrl = getBackendUrl();
 
   return (
     <TestConfigContext.Provider value={{ 
@@ -87,7 +88,7 @@ export function useTestConfig() {
       setIntervalMs: () => {},
       selectedTool: "k6" as ToolOption,
       setSelectedTool: () => {},
-      backendUrl: "http://localhost:4000",
+      backendUrl: getBackendUrl(),
       config: {},
       setConfig: () => {},
       updateConfig: () => {}
